@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Health Quest 트러블슈팅</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+<style>
+  :root {
+    color-scheme: light;
+
+    --bg:        #F2F2EF;
+    --surface:   #FBFBF9;
+    --surface-2: #E9E9E4;
+    --ink:       #16191C;
+    --ink-2:     #565C62;
+    --ink-3:     #838A90;
+    --line:      #D9D9D2;
+    --line-2:    #C3C3BA;
+
+    --teal:      #12706A;
+    --teal-soft: #D5E7E4;
+    --rust:      #9B3B2F;
+    --rust-soft: #F0DCD7;
+    --amber:     #8A6212;
+
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+    --gut: clamp(16px, 4vw, 40px);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg:        #131619;
+      --surface:   #1A1E21;
+      --surface-2: #23282C;
+      --ink:       #E7E8E4;
+      --ink-2:     #A3AAB0;
+      --ink-3:     #7B838A;
+      --line:      #2B3135;
+      --line-2:    #3A4146;
+      --teal:      #57B3AB;
+      --teal-soft: #1C3A38;
+      --rust:      #D98476;
+      --rust-soft: #3A2320;
+      --amber:     #C39A3E;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg:        #131619;
+    --surface:   #1A1E21;
+    --surface-2: #23282C;
+    --ink:       #E7E8E4;
+    --ink-2:     #A3AAB0;
+    --ink-3:     #7B838A;
+    --line:      #2B3135;
+    --line-2:    #3A4146;
+    --teal:      #57B3AB;
+    --teal-soft: #1C3A38;
+    --rust:      #D98476;
+    --rust-soft: #3A2320;
+    --amber:     #C39A3E;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding-inline: var(--gut);
+    padding-block: 0 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead { padding-block: 56px 32px; border-bottom: 1px solid var(--line); }
+
+  .kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(30px, 5.2vw, 44px);
+    line-height: 1.12;
+    letter-spacing: -.02em;
+    margin: 0 0 18px;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    margin: 0;
+    font-size: 17px;
+    color: var(--ink-2);
+    max-width: 58ch;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    margin-top: 26px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+  }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---------- index rail ---------- */
+
+  nav.index {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 5;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+    margin-inline: calc(var(--gut) * -1);
+    padding-inline: var(--gut);
+  }
+  nav.index ol {
+    list-style: none;
+    display: flex;
+    gap: 4px;
+    margin: 0;
+    padding: 8px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  nav.index ol::-webkit-scrollbar { display: none; }
+  nav.index a {
+    display: block;
+    white-space: nowrap;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .02em;
+    color: var(--ink-2);
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+  }
+  nav.index a:hover { background: var(--surface-2); color: var(--ink); }
+  nav.index a b { color: var(--teal); font-weight: 600; }
+
+  /* ---------- card ---------- */
+
+  .card { padding-block: 64px 0; }
+  .card + .card { border-top: 1px solid var(--line); }
+
+  .eyebrow {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .eyebrow .n { color: var(--teal); font-weight: 600; }
+  .eyebrow .t { color: var(--ink-3); }
+
+  .card h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(21px, 3.4vw, 27px);
+    line-height: 1.28;
+    letter-spacing: -.012em;
+    margin: 0 0 32px;
+    text-wrap: balance;
+  }
+
+  /* ---------- diagram ---------- */
+
+  figure.diagram {
+    margin: 0 0 34px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    padding: 22px 20px 16px;
+  }
+  figure.diagram > .scroll { overflow-x: auto; }
+  figure.diagram svg { display: block; width: 100%; height: auto; max-width: 100%; }
+  figure.diagram figcaption {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: var(--ink-3);
+  }
+
+  .svg-label { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-2); }
+  .svg-label.dim { fill: var(--ink-3); }
+  .svg-label.em  { fill: var(--ink); font-weight: 500; }
+  .svg-label.acc { fill: var(--teal); font-weight: 500; }
+  .svg-label.bad { fill: var(--rust); font-weight: 500; }
+  .svg-box  { fill: var(--surface-2); stroke: var(--line-2); }
+  .svg-box.acc { fill: var(--teal-soft); stroke: var(--teal); }
+  .svg-box.bad { fill: var(--rust-soft); stroke: var(--rust); }
+  .svg-line { stroke: var(--line-2); fill: none; }
+  .svg-line.acc { stroke: var(--teal); }
+  .svg-line.bad { stroke: var(--rust); }
+
+  /* ---------- body blocks ---------- */
+
+  .block { margin-bottom: 30px; }
+  .block > h3 {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .block p { margin: 0 0 12px; max-width: 68ch; }
+  .block p:last-child { margin-bottom: 0; }
+  .block strong { font-weight: 600; color: var(--ink); }
+  code {
+    font-family: var(--mono);
+    font-size: .86em;
+    background: var(--surface-2);
+    padding: 1px 5px;
+    border-radius: 2px;
+  }
+
+  /* option comparison */
+  ul.options { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  ul.options li { background: var(--surface); padding: 11px 14px; display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: baseline; }
+  ul.options .k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+  ul.options li.pick { background: var(--teal-soft); }
+  ul.options li.pick .k { color: var(--teal); font-weight: 600; }
+  ul.options .txt { font-size: 15px; line-height: 1.6; }
+
+  /* ---------- result ---------- */
+
+  .result {
+    border: 1px solid var(--teal);
+    border-left-width: 3px;
+    border-radius: 2px;
+    background: var(--surface);
+    padding: 20px 22px;
+    margin-bottom: 18px;
+  }
+  .result > h3 { color: var(--teal); border-bottom-color: var(--teal-soft); }
+
+  .figures {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 0 0 16px;
+  }
+  .fig { background: var(--surface); padding: 12px 14px; }
+  .fig .lab { font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); display: block; margin-bottom: 4px; }
+  .fig .val { font-family: var(--display); font-weight: 600; font-size: 21px; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .fig .val small { font-size: 12px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+  .fig .sub { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); display: block; margin-top: 2px; }
+  .fig .val.acc { color: var(--teal); }
+
+  /* ---------- test conditions ---------- */
+
+  .conditions {
+    background: var(--surface-2);
+    border-radius: 2px;
+    padding: 16px 18px;
+  }
+  .conditions h4 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 10px;
+  }
+  .conditions dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 5px 18px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .conditions dt { color: var(--ink-3); }
+  .conditions dd { margin: 0; color: var(--ink-2); }
+  @media (max-width: 520px) {
+    .conditions dl { grid-template-columns: 1fr; gap: 2px; }
+    .conditions dd { margin-bottom: 8px; }
+  }
+
+  /* ---------- honesty note ---------- */
+
+  .note {
+    border-left: 2px solid var(--line-2);
+    padding: 2px 0 2px 16px;
+    margin: 0 0 30px;
+    color: var(--ink-2);
+    font-size: 15px;
+    max-width: 66ch;
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  footer.end {
+    margin-top: 72px;
+    padding-top: 26px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.75;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+  a:focus-visible, nav.index a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="kicker">Health Quest · Game Service</p>
+    <h1>퀘스트 판정과 보상 지급에서 마주친 다섯 가지</h1>
+    <p class="standfirst">
+      건강 활동 이벤트를 받아 진행도를 계산하고, 완료를 판정하고, XP를 지급하고,
+      그 사실을 다른 서비스에 알리는 구간을 맡았습니다.
+      돈이 오가는 경로라 <strong>중복 지급과 유실이 기능 결함보다 비쌌고</strong>,
+      아래 다섯 건은 그 경계에서 나온 판단들입니다.
+    </p>
+    <div class="meta">
+      <span><b>팀</b> 6명 / 4주 / MSA</span>
+      <span><b>스택</b> Spring Boot · Kafka · PostgreSQL · Redis</span>
+      <span><b>담당</b> Quest 판정 · XP 원장 · 이벤트 발행</span>
+    </div>
+  </header>
+
+  <nav class="index" aria-label="사례 목록">
+    <ol>
+      <li><a href="#c1"><b>01</b> 파티 동시 완료</a></li>
+      <li><a href="#c2"><b>02</b> 잡혔는데 롤백</a></li>
+      <li><a href="#c3"><b>03</b> AI 제목 100% 실패</a></li>
+      <li><a href="#c4"><b>04</b> 발행 유실 차단</a></li>
+      <li><a href="#c5"><b>05</b> 발행 지연</a></li>
+    </ol>
+  </nav>
+
+  <!-- ============================================================ 01 -->
+  <article class="card" id="c1">
+    <div class="eyebrow"><span class="n">01</span><span class="t">동시성 · 중복 지급</span></div>
+    <h2>파티 퀘스트 동시 완료 시 발생하는 XP 중복 지급 차단</h2>
+
+    <figure class="diagram">
+      <div class="scroll">
+        <svg viewBox="0 0 700 290" role="img" aria-label="멤버 네 명의 이벤트가 서로 다른 파티션과 스레드를 거쳐 하나의 공유 카운터에 도달하고, 조건부 UPDATE가 완료를 한 번만 선점하는 흐름">
+          <text x="0" y="12" class="svg-label dim">파티션 키 = userId · 멤버가 서로 다른 유저라 파티션이 갈린다</text>
+
+          <g>
+            <rect x="0"   y="28" width="128" height="30" rx="2" class="svg-box"/>
+            <text x="12"  y="47" class="svg-label em">멤버 A · P0 · #0-0</text>
+            <rect x="0"   y="64" width="128" height="30" rx="2" class="svg-box"/>
+            <text x="12"  y="83" class="svg-label em">멤버 B · P1 · #0-1</text>
+            <rect x="0"   y="100" width="128" height="30" rx="2" class="svg-box"/>
+            <text x="12"  y="119" class="svg-label em">멤버 C · P2 · #0-2</text>
+            <rect x="0"   y="136" width="128" height="30" rx="2" class="svg-box"/>
+            <text x="12"  y="155" class="svg-label em">멤버 D · P0 · #0-0</text>
+          </g>
+
+          <path d="M128 43 L206 43 L206 92 L232 92" class="svg-line" stroke-width="1.2"/>
+          <path d="M128 79 L196 79 L196 92 L232 92" class="svg-line" stroke-width="1.2"/>
+          <path d="M128 115 L196 115 L196 92 L232 92" class="svg-line" stroke-width="1.2"/>
+          <path d="M128 151 L206 151 L206 92 L232 92" class="svg-line" stroke-width="1.2"/>
+          <text x="150" y="182" class="svg-label bad">네 스레드가 동시에</text>
+
+          <rect x="232" y="62" width="178" height="60" rx="2" class="svg-box acc"/>
+          <text x="246" y="84" class="svg-label acc">공유 카운터</text>
+          <text x="246" y="102" class="svg-label em">current_val += delta</text>
+          <text x="246" y="116" class="svg-label dim">상태 가드를 걸지 않는다</text>
+
+          <path d="M410 92 L452 92" class="svg-line" stroke-width="1.2"/>
+          <polygon points="452,88 460,92 452,96" fill="currentColor" class="svg-line"/>
+
+          <rect x="460" y="46" width="240" height="92" rx="2" class="svg-box acc"/>
+          <text x="472" y="68" class="svg-label acc">조건부 UPDATE — 완료 선점</text>
+          <text x="472" y="86" class="svg-label em">SET status = COMPLETED</text>
+          <text x="472" y="102" class="svg-label">WHERE status = ACTIVE</text>
+          <text x="472" y="116" class="svg-label">  AND expired_at &gt; :at</text>
+          <text x="472" y="130" class="svg-label">  AND current_val &gt;= target</text>
+
+          <path d="M580 138 L580 168" class="svg-line acc" stroke-width="1.2"/>
+          <polygon points="576,168 580,176 584,168" class="svg-line acc" fill="currentColor"/>
+          <rect x="460" y="180" width="118" height="46" rx="2" class="svg-box acc"/>
+          <text x="470" y="199" class="svg-label acc">1행 반환</text>
+          <text x="470" y="216" class="svg-label em">보상 지급</text>
+          <rect x="590" y="180" width="110" height="46" rx="2" class="svg-box"/>
+          <text x="600" y="199" class="svg-label dim">0행 반환</text>
+          <text x="600" y="216" class="svg-label">그냥 종료</text>
+          <path d="M580 176 L520 176 L520 180" class="svg-line acc" stroke-width="1.2"/>
+          <path d="M580 176 L645 176 L645 180" class="svg-line" stroke-width="1.2"/>
+
+          <text x="0" y="212" class="svg-label dim">정합성 등식</text>
+          <text x="0" y="230" class="svg-label em">current_val</text>
+          <text x="0" y="246" class="svg-label em">  == SUM(기여분)</text>
+          <text x="0" y="266" class="svg-label dim">실험의 검증 쿼리가</text>
+          <text x="0" y="280" class="svg-label dim">이 한 줄이었다</text>
+        </svg>
+      </div>
+      <figcaption>동시에 들어온 네 트랜잭션 중 <b>UPDATE가 1행을 돌려준 하나만</b> 보상 경로로 들어간다. 조건 세 개가 전부 한 문장 안에 있어야 하며, 하나라도 애플리케이션으로 꺼내면 읽는 시점과 쓰는 시점이 벌어져 넷이 전부 통과한다.</figcaption>
+    </figure>
+
+    <div class="block">
+      <h3>문제 원인</h3>
+      <p>
+        개인 퀘스트는 파티션 키가 <code>userId</code>라 한 유저의 이벤트를 한 스레드가 순서대로 처리해 경합이 없습니다.
+        파티는 멤버 네 명이 서로 다른 유저라 <strong>서로 다른 파티션에서 오고, 네 스레드가 같은 행을 동시에 건드립니다.</strong>
+        합계가 목표에 닿는 순간 네 명이 전부 완료로 판단하면 XP가 네 배로 나가고,
+        반대로 각자 자기 기여만 반영한 뒤 합계를 읽으면 <strong>커밋되지 않은 남의 기여가 보이지 않아 아무도 완료를 못 봅니다.</strong>
+        하루짜리 퀘스트라 그 이벤트가 막차면 그대로 미완으로 끝납니다.
+      </p>
+    </div>
+
+    <div class="block">
+      <h3>해결 과정</h3>
+      <ul class="options">
+        <li><span class="k">A</span><span class="txt">멤버 기여분을 그때그때 합산 — <b>완료 누락 쪽으로 깨집니다.</b> 커밋 전 기여가 안 보입니다</span></li>
+        <li><span class="k">B</span><span class="txt">비관적 락으로 직렬화 — 네 명이 줄을 서고, 파티가 늘면 처리량이 막힙니다</span></li>
+        <li class="pick"><span class="k">C</span><span class="txt">공유 카운터 + 조건부 UPDATE 선점 — <b>채택</b></span></li>
+      </ul>
+      <p>
+        두 실패 모드의 처방이 반대 방향이라 하나로는 안 됩니다.
+        <strong>완료 누락은 공유 카운터가, 중복 지급은 조건부 UPDATE 선점이 막습니다.</strong>
+        카운터에는 상태 가드를 걸지 않고 순수 누적만 시켰는데, 처음엔 걸었다가
+        <strong>완료 직후 도착한 이벤트에서 멤버 행만 갱신되고 합계는 막혀 정합성 등식이 깨졌습니다.</strong>
+        가드를 판정 지점 한 곳으로 모으고, 보상 지급과 선점을 같은 트랜잭션에 묶어
+        선점만 성공하고 죽는 상태가 남지 않게 했습니다.
+      </p>
+    </div>
+
+    <div class="block result">
+      <h3>결과</h3>
+      <div class="figures">
+        <div class="fig"><span class="lab">완료 판정</span><span class="val acc">100<small>/100</small></span><span class="sub">미완 0건</span></div>
+        <div class="fig"><span class="lab">XP 원장</span><span class="val acc">400<small>건</small></span><span class="sub">총액 12,000 · 파티당 정확히 4건</span></div>
+        <div class="fig"><span class="lab">정합성 등식 위반</span><span class="val acc">0<small>행</small></span><span class="sub">지갑–원장 불일치도 0행</span></div>
+      </div>
+      <p>
+        <strong>검증 줄은 동시성이 없어도 통과합니다.</strong> 그래서 로그에서 스레드를 직접 셌습니다 —
+        세 스레드가 각각 232 · 296 · 272건을 처리했고,
+        <strong>100개 파티 중 98개가 서로 다른 스레드에서 같은 행에 동시에 썼습니다.</strong>
+      </p>
+      <p>
+        그리고 컨슈머 스레드를 1개로 되돌려 같은 실험을 다시 돌렸습니다.
+        <strong>검증 다섯 줄이 전부 같고 스레드 관련 두 줄만 달랐습니다.</strong>
+        이것으로 정합성이 우연이 아니라 <strong>동시 경쟁을 견딘 결과</strong>라는 것이 확정됐습니다.
+      </p>
+      <p class="note" style="margin-top:18px;margin-bottom:0">
+        <b>증명된 것은 하나입니다.</b> 조건부 UPDATE 선점과 공유 카운터가 3스레드 실경쟁에서
+        중복 지급 0 · 갱신 유실 0을 지켰습니다. 낙관적 락과 원장 유니크 제약은
+        이 경로에서 <b>발동하지 않았으므로 여전히 미검증</b>입니다.
+      </p>
+    </div>
+
+    <div class="conditions">
+      <h4>테스트 조건</h4>
+      <dl>
+        <dt>부하</dt><dd>파티 100개 × 멤버 4명 = 이벤트 400건, 일괄 주입</dd>
+        <dt>설계값</dt><dd>멤버 기준값 1,000 · 이벤트 누적값 2,000 · 파티 목표 4,000 (네 명이 전부 반영돼야 도달)</dd>
+        <dt>비교군</dt><dd>컨슈머 스레드 3개 ↔ 1개 (<code>spring.kafka.listener.concurrency</code>만 변경)</dd>
+        <dt>환경</dt><dd>Kafka 단일 노드 · 파티션 3 / PostgreSQL 16.14 (Docker) / 처리 시간 400건 8.6초</dd>
+      </dl>
+    </div>
+  </article>
+
+  <!-- ============================================================ 02 -->
+  <article class="card" id="c2">
+    <div class="eyebrow"><span class="n">02</span><span class="t">트랜잭션 전파</span></div>
+    <h2>예외를 잡았는데도 커밋 시점에 트랜잭션이 롤백되던 문제</h2>
+
+    <figure class="diagram">
+      <div class="scroll">
+        <svg viewBox="0 0 700 250" role="img" aria-label="참여만 한 메서드가 롤백 전용 표시를 남겨 catch가 무력화되는 구조와, REQUIRES_NEW를 안쪽으로 내린 뒤의 구조 비교">
+          <text x="0" y="12" class="svg-label bad">BEFORE — 트랜잭션을 여는 프록시와 예외를 보는 프록시가 다르다</text>
+          <rect x="0" y="24" width="320" height="96" rx="2" class="svg-box bad"/>
+          <text x="12" y="44" class="svg-label bad">리스너  @Transactional(REQUIRES_NEW)</text>
+          <rect x="16" y="54" width="288" height="42" rx="2" class="svg-box"/>
+          <text x="28" y="72" class="svg-label em">onXpChanged  @Transactional</text>
+          <text x="28" y="88" class="svg-label dim">= REQUIRED · 남의 트랜잭션에 참여만</text>
+          <text x="12" y="112" class="svg-label">catch (Exception e) { log.error(...); }</text>
+
+          <path d="M320 75 L360 75" class="svg-line bad" stroke-width="1.2"/>
+          <polygon points="360,71 368,75 360,79" class="svg-line bad" fill="currentColor"/>
+          <text x="376" y="58" class="svg-label bad">예외는 잡힌다</text>
+          <text x="376" y="76" class="svg-label bad">그런데 rollback-only 표시가 남는다</text>
+          <text x="376" y="94" class="svg-label em">→ 커밋 시점 UnexpectedRollbackException</text>
+          <text x="376" y="112" class="svg-label dim">15:23:49.817 catch → .822 재발생</text>
+
+          <text x="0" y="152" class="svg-label acc">AFTER — 자기 트랜잭션의 주인이 예외를 본다</text>
+          <rect x="0" y="164" width="320" height="76" rx="2" class="svg-box"/>
+          <text x="12" y="184" class="svg-label em">리스너  (트랜잭션 없음)</text>
+          <rect x="16" y="194" width="288" height="34" rx="2" class="svg-box acc"/>
+          <text x="28" y="215" class="svg-label acc">onXpChanged  @Transactional(REQUIRES_NEW)</text>
+
+          <path d="M320 205 L360 205" class="svg-line acc" stroke-width="1.2"/>
+          <polygon points="360,201 368,205 360,209" class="svg-line acc" fill="currentColor"/>
+          <text x="376" y="192" class="svg-label acc">자기 것이라 직접 롤백한다</text>
+          <text x="376" y="210" class="svg-label em">표시가 안 남는다 → catch 가 제 일을 한다</text>
+          <text x="376" y="228" class="svg-label dim">Redis 호출만 별도 try-catch 로 격리</text>
+        </svg>
+      </div>
+      <figcaption><b>예외</b>는 던져지고 잡히면 사라지지만, <b>롤백 전용 표시</b>는 트랜잭션 상태에 붙어 있어 <code>catch</code>가 건드리지 못합니다. 지우는 API 자체가 없습니다 — 한 번 신뢰를 잃은 트랜잭션을 되살릴 방법이 있으면 안 되기 때문입니다.</figcaption>
+    </figure>
+
+    <div class="block">
+      <h3>문제 원인</h3>
+      <p>
+        파티 동시성 실험을 Redis 없이 돌렸더니 <strong>본 실험은 전부 통과했는데 로그에 예외 스택이 800줄</strong> 쌓여 있었습니다.
+        절반은 예상한 Redis 연결 실패였고, 나머지 400건은
+        <strong>랭킹 리스너의 <code>catch</code>가 예외를 잡은 5밀리초 뒤에 커밋 시점에서 다시 터진 <code>UnexpectedRollbackException</code></strong>이었습니다.
+        “랭킹 실패가 XP 지급을 되돌리거나 컨슈머를 멈춰선 안 되므로 여기서 반드시 삼킨다”는 주석이 달린 방어선이
+        <strong>처음부터 뚫려 있었습니다.</strong>
+      </p>
+    </div>
+
+    <div class="block">
+      <h3>해결 과정</h3>
+      <p>
+        안쪽 메서드가 <code>REQUIRED</code>라 리스너가 연 트랜잭션에 <strong>참여만</strong> 합니다.
+        참여한 메서드는 남의 트랜잭션을 직접 롤백하지 못해 <strong>“롤백해야 함” 표시만 남기고 예외를 올립니다.</strong>
+        <code>catch</code>는 예외를 다루고 그 표시는 트랜잭션 상태에 붙어 있어, 잡아도 지워지지 않습니다.
+        <strong><code>REQUIRES_NEW</code>를 리스너에서 안쪽 메서드로 내려</strong> 트랜잭션을 여는 프록시와 예외를 보는 프록시를 일치시키고,
+        Redis 호출만 별도 <code>try-catch</code>로 감싸 캐시 실패가 성공한 DB 쓰기까지 끌고 가지 않게 했습니다.
+      </p>
+    </div>
+
+    <div class="block result">
+      <h3>결과</h3>
+      <p>
+        이 설계는 <strong>제가 팀에 제안한 것이었습니다.</strong> 세 층이 각각 다른 것을 막는다는 표를 그려 넘겼고,
+        구현은 그 표대로 들어갔습니다. <strong>실험이 그중 한 층이 동작하지 않는다는 것을 드러냈고</strong>,
+        원인을 규명해 결정 문서에 남긴 뒤 처방을 담당자에게 전달했습니다.
+      </p>
+      <p>
+        <strong>며칠 뒤 다른 팀원의 업적 기능 PR에 같은 구조가 복제된 것을 리뷰에서 발견했습니다.</strong>
+        “여기서 삼킨다”는 주석까지 같았고, 이쪽은 예외가 <strong>파티 종료 배치까지 전파되는 경로</strong>라 더 나빴습니다.
+        문서에 남겨둔 타임스탬프 두 줄이 그대로 근거가 됐습니다.
+      </p>
+      <p class="note" style="margin-top:18px;margin-bottom:0">
+        <b>컨슈머가 멈추지 않은 이유가 제 <code>catch</code>가 아니었다는 것도 이때 알았습니다.</b>
+        프레임워크가 완료 콜백의 예외를 내부에서 삼키고 있었습니다.
+        설계로 막은 것이 아니라 운이 좋았던 것이고, 그 차이를 아는 것이 이 항목의 값어치입니다.
+      </p>
+    </div>
+
+    <div class="conditions">
+      <h4>테스트 조건</h4>
+      <dl>
+        <dt>발견 경로</dt><dd>파티 동시성 실험(400건) 중 Redis를 기동하지 않은 상태에서 부수적으로 발견</dd>
+        <dt>관측</dt><dd>예외 스택 800줄 = <code>RedisConnectionFailureException</code> 400 + <code>UnexpectedRollbackException</code> 400</dd>
+        <dt>확정 근거</dt><dd>같은 이벤트에 대한 로그 타임스탬프 — catch 로그 15:23:49.817 → 재발생 15:23:49.822</dd>
+        <dt>영향 범위</dt><dd>XP 원장·퀘스트 완료는 커밋 후라 안전 · <code>characters</code> 레벨 갱신만 함께 롤백</dd>
+      </dl>
+    </div>
+  </article>
+
+  <!-- ============================================================ 03 -->
+  <article class="card" id="c3">
+    <div class="eyebrow"><span class="n">03</span><span class="t">외부 연동 · 타임아웃</span></div>
+    <h2>AI가 만든 퀘스트 제목이 100% 폴백으로 나가던 원인 규명</h2>
+
+    <figure class="diagram">
+      <div class="scroll">
+        <svg viewBox="0 0 700 220" role="img" aria-label="AI 응답 시간 4회 실측값이 모두 설정된 2초 타임아웃을 넘는 것을 보여주는 막대 그래프">
+          <text x="0" y="12" class="svg-label dim">AI 응답 시간 실측 (격리 측정 4회) · 초</text>
+
+          <line x1="70" y1="26" x2="70" y2="172" class="svg-line" stroke-width="1"/>
+          <line x1="70" y1="172" x2="660" y2="172" class="svg-line" stroke-width="1"/>
+
+          <line x1="104" y1="26" x2="104" y2="172" class="svg-line bad" stroke-width="1.5" stroke-dasharray="4 3"/>
+          <text x="110" y="38" class="svg-label bad">설정된 readTimeout = 2초</text>
+
+          <rect x="70" y="44" width="160" height="18" rx="1" class="svg-box bad"/>
+          <text x="0"  y="57" class="svg-label">1회차</text>
+          <text x="238" y="57" class="svg-label em">4.6</text>
+
+          <rect x="70" y="72" width="198" height="18" rx="1" class="svg-box bad"/>
+          <text x="0"  y="85" class="svg-label">2회차</text>
+          <text x="276" y="85" class="svg-label em">5.7</text>
+
+          <rect x="70" y="100" width="243" height="18" rx="1" class="svg-box bad"/>
+          <text x="0"  y="113" class="svg-label">3회차</text>
+          <text x="321" y="113" class="svg-label em">7.0</text>
+
+          <rect x="70" y="128" width="573" height="18" rx="1" class="svg-box bad"/>
+          <text x="0"  y="141" class="svg-label">4회차</text>
+          <text x="600" y="141" class="svg-label em" fill="currentColor">16.5</text>
+
+          <text x="66"  y="188" class="svg-label dim">0</text>
+          <text x="98"  y="188" class="svg-label dim">2</text>
+          <text x="236" y="188" class="svg-label dim">6</text>
+          <text x="410" y="188" class="svg-label dim">11</text>
+          <text x="584" y="188" class="svg-label dim">16</text>
+
+          <text x="0" y="212" class="svg-label bad">네 번 다 타임아웃선 오른쪽 — 성공할 수 있는 호출이 하나도 없었다</text>
+        </svg>
+      </div>
+      <figcaption>타임아웃 값이 응답 분포와 겹치지 않으면 성공률은 낮은 것이 아니라 <b>0</b>입니다. 폴백이 “가끔” 나온 게 아니라 <b>AI 응답이 한 번도 채택된 적이 없었습니다.</b></figcaption>
+    </figure>
+
+    <div class="block">
+      <h3>문제 원인</h3>
+      <p>
+        생성된 퀘스트의 제목이 언제 확인해도 고정 문자열이었습니다.
+        코드는 AI 응답을 쓰게 돼 있는데 실제로는 <strong><code>catch</code> 블록의 폴백만 나가고 있었습니다.</strong>
+        API 키·모델명·주소는 전부 정상이라 설정 문제가 아니었고,
+        호출을 애플리케이션에서 떼어내 격리 측정한 결과 <strong>응답이 4.6 / 5.7 / 7.0 / 16.5초</strong>인데
+        코드의 <code>readTimeout</code>은 <strong>2초</strong>였습니다.
+      </p>
+    </div>
+
+    <div class="block">
+      <h3>해결 과정</h3>
+      <p>
+        처방은 두 줄입니다 — <strong><code>readTimeout</code> 2초 → 8초</strong>,
+        그리고 <strong><code>RetryTemplate.maxAttempts</code> 2회 → 1회</strong>.
+        재시도를 <em>늘리지 않고 줄인</em> 것이 이 판단의 핵심입니다.
+        이 실패는 일시적 장애가 아니라 <strong>“원래 느린 작업”이라 재시도가 조건을 바꾸지 못합니다.</strong>
+        그리고 이 호출이 동기화 트랜잭션 안에 있어서, 재시도를 남겨두면
+        <strong>트랜잭션 최악 지속 시간이 20.5초가 되어 오히려 더 나빠집니다.</strong>
+        근본 처방인 “AI 호출을 트랜잭션 밖으로 빼기”는 상태와 워커가 추가돼 4주 일정 밖이라
+        <strong>알고 미룬 것으로 문서에 남겼습니다.</strong>
+      </p>
+    </div>
+
+    <div class="block result">
+      <h3>결과</h3>
+      <p>
+        <strong>이 코드는 제 담당이 아니라 건강 데이터 서비스 담당자의 영역입니다.</strong>
+        제가 한 것은 증상에서 출발해 남의 코드까지 따라 들어가 원인을 숫자로 확정하고,
+        측정값·처방·처방을 반쪽만 적용하면 오히려 나빠지는 이유까지 정리해 전달한 것까지입니다.
+        <strong>적용 후 성공률은 아직 재측정하지 않았습니다.</strong>
+      </p>
+      <p class="note" style="margin-top:18px;margin-bottom:0">
+        <b>처음 리뷰에서는 최악을 7.5초로 추정했었습니다.</b>
+        Feign 3초 + AI 2초 × 2회 + 백오프 0.5초로 계산한 값인데,
+        실측해보니 <b>추정이 두 배 낙관적이었습니다.</b> 계산보다 측정이 먼저인 이유가 여기 있습니다.
+      </p>
+    </div>
+
+    <div class="conditions">
+      <h4>테스트 조건</h4>
+      <dl>
+        <dt>측정 방법</dt><dd>AI 호출만 애플리케이션에서 격리해 단독 실행, 왕복 시간 4회 기록</dd>
+        <dt>실측값</dt><dd>4.6 / 5.7 / 7.0 / 16.5초 (중앙값 6.35초)</dd>
+        <dt>설정값</dt><dd>Feign connectTimeout 3초 · readTimeout 2초 · RetryTemplate 2회 · 백오프 0.5초</dd>
+        <dt>호출 위치</dt><dd>동기화 트랜잭션 내부 · 유저·날짜당 1회 호출</dd>
+      </dl>
+    </div>
+  </article>
+
+  <!-- ============================================================ 04 -->
+  <article class="card" id="c4">
+    <div class="eyebrow"><span class="n">04</span><span class="t">설계 · 유실 방지</span></div>
+    <h2>DB 커밋과 Kafka 발행이 갈라지는 지점의 유실 차단</h2>
+
+    <figure class="diagram">
+      <div class="scroll">
+        <svg viewBox="0 0 700 250" role="img" aria-label="발행 먼저, 커밋 먼저, 그리고 채택한 아웃박스 방식 세 가지의 실패 지점 비교">
+          <text x="0" y="12" class="svg-label bad">① 발행 먼저 — 커밋이 실패하면</text>
+          <rect x="0" y="22" width="86" height="28" rx="2" class="svg-box"/>
+          <text x="10" y="41" class="svg-label em">Kafka 발행</text>
+          <path d="M86 36 L110 36" class="svg-line" stroke-width="1.2"/>
+          <rect x="112" y="22" width="74" height="28" rx="2" class="svg-box bad"/>
+          <text x="122" y="41" class="svg-label bad">커밋 실패</text>
+          <text x="196" y="41" class="svg-label bad">→ 일어나지 않은 일의 이벤트가 나간다</text>
+
+          <text x="0" y="82" class="svg-label bad">② 커밋 먼저 — 그 사이에 죽으면</text>
+          <rect x="0" y="92" width="86" height="28" rx="2" class="svg-box"/>
+          <text x="10" y="111" class="svg-label em">DB 커밋</text>
+          <path d="M86 106 L110 106" class="svg-line" stroke-width="1.2"/>
+          <rect x="112" y="92" width="74" height="28" rx="2" class="svg-box bad"/>
+          <text x="120" y="111" class="svg-label bad">프로세스 종료</text>
+          <text x="196" y="111" class="svg-label bad">→ 지급은 됐는데 아무도 모른다</text>
+
+          <text x="0" y="152" class="svg-label acc">③ 채택 — 같은 트랜잭션에는 적재만, 발행은 따로</text>
+          <rect x="0" y="162" width="250" height="72" rx="2" class="svg-box acc"/>
+          <text x="12" y="182" class="svg-label acc">한 트랜잭션</text>
+          <text x="12" y="200" class="svg-label em">원장 INSERT · 지갑 갱신</text>
+          <text x="12" y="216" class="svg-label em">퀘스트 상태 · outbox 적재</text>
+          <text x="12" y="230" class="svg-label dim">함께 커밋되거나 함께 사라진다</text>
+
+          <path d="M250 198 L292 198" class="svg-line acc" stroke-width="1.2"/>
+          <polygon points="292,194 300,198 292,202" class="svg-line acc" fill="currentColor"/>
+
+          <rect x="302" y="162" width="200" height="72" rx="2" class="svg-box"/>
+          <text x="314" y="182" class="svg-label em">발행기 (별도 스케줄러)</text>
+          <text x="314" y="200" class="svg-label">PENDING 폴링 → 발행</text>
+          <text x="314" y="216" class="svg-label dim">payload 원문 그대로</text>
+          <text x="314" y="230" class="svg-label dim">event_id 가 재발행에도 불변</text>
+
+          <path d="M502 198 L544 198" class="svg-line" stroke-width="1.2"/>
+          <polygon points="544,194 552,198 544,202" class="svg-line" fill="currentColor"/>
+          <rect x="554" y="176" width="146" height="44" rx="2" class="svg-box"/>
+          <text x="566" y="195" class="svg-label em">Kafka</text>
+          <text x="566" y="211" class="svg-label dim">실패하면 PENDING 유지</text>
+        </svg>
+      </div>
+      <figcaption>DB 커밋과 브로커 발행은 <b>한 트랜잭션에 묶을 수 없습니다.</b> 둘 중 무엇을 먼저 해도 그 사이가 유실 구멍이 되므로, 발행을 <b>DB에 적재하는 행위로 바꿔</b> 트랜잭션 안으로 들여왔습니다.</figcaption>
+    </figure>
+
+    <div class="block">
+      <h3>문제 원인</h3>
+      <p>
+        이 건은 장애를 겪고 고친 것이 아니라 <strong>설계 단계에서 막은 것</strong>입니다.
+        완료 판정 뒤에 원장 INSERT · 지갑 갱신 · 이벤트 발행이 이어지는데,
+        <strong>DB 커밋과 Kafka 발행은 같은 트랜잭션에 묶이지 않습니다.</strong>
+        발행을 먼저 하면 커밋이 실패했을 때 <strong>일어나지 않은 일의 이벤트</strong>가 나가고,
+        커밋을 먼저 하면 그 사이에 프로세스가 죽었을 때 <strong>지급은 됐는데 아무도 모르는 상태</strong>가 됩니다.
+      </p>
+    </div>
+
+    <div class="block">
+      <h3>해결 과정</h3>
+      <p>
+        같은 트랜잭션에서는 <strong>DB 테이블에 적재만</strong> 하고, 별도 스케줄러가 <code>PENDING</code>을 폴링해 발행합니다.
+        발행 실패 시 <strong>DLQ 대신 상태를 유지한 채 재시도</strong>하고, 재시도가 일정 횟수를 넘으면 로그 레벨만 <code>WARN</code>에서 <code>ERROR</code>로 올립니다 —
+        재시도 5회 후 DLQ로 보내면 <strong>브로커가 5초만 죽어 있어도 이벤트가 그리로 빠지는데, 그 DLQ를 소비할 사람이 팀에 없었습니다.</strong>
+        <strong>소비자 없는 DLQ는 유실의 다른 이름</strong>이라고 보고 무한 재시도를 택했습니다.
+        발행할 때는 적재 시점의 payload 원문을 그대로 보내 <strong>재발행해도 <code>event_id</code>가 바뀌지 않게</strong> 했습니다.
+      </p>
+    </div>
+
+    <div class="block result">
+      <h3>결과</h3>
+      <div class="figures">
+        <div class="fig"><span class="lab">중복 주입 시 변화</span><span class="val acc">0<small>건</small></span><span class="sub">관련 4개 테이블 전부</span></div>
+        <div class="fig"><span class="lab">발행 재시도</span><span class="val acc">0<small>회</small></span><span class="sub">관통 검증 2건 모두 첫 시도 성공</span></div>
+        <div class="fig"><span class="lab">발행 처리량 천장</span><span class="val">79<small>건/초</small></span><span class="sub">5,000건 소진 63.2초</span></div>
+      </div>
+      <p>
+        전 구간 관통 검증에서 회원가입부터 퀘스트 생성 · 완료 · XP 지급 · 랭킹 반영까지 이어졌고,
+        같은 이벤트를 다시 주입했을 때 <strong>관련 4개 테이블이 전부 변화 0건</strong>이었습니다.
+      </p>
+      <p>
+        구조가 정해놓은 <strong>처리량 천장도 측정했습니다.</strong> 5,000건을 주입해 소진까지 63.2초,
+        초당 79건이었고 사이클의 82%가 폴링 대기였습니다.
+        실제 발행량이 초당 0.23건이라 <strong>지금 부하에서는 병목이 아니지만, 천장이 어디인지는 숫자로 알고 있습니다.</strong>
+      </p>
+    </div>
+
+    <div class="conditions">
+      <h4>테스트 조건</h4>
+      <dl>
+        <dt>멱등 검증</dt><dd>동일 이벤트를 <code>kafka-console-producer</code>로 재주입 · <code>quests</code>·<code>xp_ledgers</code>·<code>wallets</code>·<code>outbox_events</code> 대조</dd>
+        <dt>처리량 측정</dt><dd><code>outbox_events</code>에 PENDING 5,000건 일괄 주입 후 1초 간격으로 잔량 샘플링</dd>
+        <dt>설정</dt><dd>poll-size 100 · poll-interval 1,000ms · <code>acks=all</code> · 발행 건당 동기 대기</dd>
+        <dt>환경</dt><dd>PostgreSQL 16.14 (Docker) · Kafka 단일 노드 파티션 3 · game-service 단독 기동</dd>
+      </dl>
+    </div>
+  </article>
+
+  <!-- ============================================================ 05 -->
+  <article class="card" id="c5">
+    <div class="eyebrow"><span class="n">05</span><span class="t">지연 측정</span></div>
+    <h2>퀘스트 완료 알림이 최대 1초 늦게 나가던 발행 지연 개선</h2>
+
+    <figure class="diagram">
+      <div class="scroll">
+        <svg id="latency" viewBox="0 0 700 250" role="img" aria-label="폴링 주기 1000밀리초와 200밀리초에서 측정한 41건씩의 발행 지연 분포 비교">
+          <text x="0" y="12" class="svg-label dim">발행 지연 실측 · 41건씩 · 가로축 밀리초</text>
+          <g id="lat-axis"></g>
+          <g id="lat-dots"></g>
+        </svg>
+      </div>
+      <figcaption>값이 <b>0부터 주기까지 고르게 흩어져 있다는 것</b>이 지연의 정체를 말해줍니다 — 발행 자체(Kafka 왕복)는 최소값 안에 들어가고, 나머지는 전부 <b>다음 폴링을 기다린 시간</b>입니다.</figcaption>
+    </figure>
+
+    <div class="block">
+      <h3>문제 원인</h3>
+      <p>
+        발행기의 처리량 천장을 재다가 <strong>한 라운드가 1.23초마다 돈다</strong>는 것을 보고 지연을 따로 측정했습니다.
+        발행기를 포화시키지 않도록 1.3초 간격으로 41건을 넣어 <code>published_at − created_at</code>을 재니
+        <strong>평균 531ms · p95 963ms · 최악 1,011ms</strong>였고, 값이 0~1초에 <strong>균등하게</strong> 흩어져 있었습니다.
+        Kafka 왕복은 최소값 46ms 안에 들어가므로, 지연의 정체는 발행이 아니라 <strong>폴링 주기를 기다린 시간</strong>이었습니다.
+      </p>
+    </div>
+
+    <div class="block">
+      <h3>해결 과정</h3>
+      <ul class="options">
+        <li class="pick"><span class="k">A</span><span class="txt">폴링 주기를 1,000ms → 200ms로 줄인다 — <b>채택</b></span></li>
+        <li><span class="k">B</span><span class="txt">주기는 두고, 적재 트랜잭션이 커밋될 때 발행기를 즉시 깨운다</span></li>
+      </ul>
+      <p>
+        B가 빈 조회를 늘리지 않으면서 지연을 더 줄이지만,
+        <strong>깨운 라운드와 예약된 라운드가 겹칠 수 있습니다.</strong>
+        지금은 <code>fixedDelay</code>라 이전 라운드가 끝나야 다음이 시작돼 <strong>라운드가 절대 겹치지 않고,
+        그 성질이 같은 파티션 안의 발행 순서를 보장</strong>하고 있습니다.
+        이 서비스는 건강 데이터를 누적값으로 판정해서 <strong>순서가 뒤집히면 진행도가 거꾸로 갑니다.</strong>
+        0.1초를 더 줄이자고 순서 보장을 흔들 수는 없다고 보고 A를 택했습니다.
+      </p>
+    </div>
+
+    <div class="block result">
+      <h3>결과</h3>
+      <div class="figures">
+        <div class="fig"><span class="lab">평균 지연</span><span class="val acc">112<small>ms</small></span><span class="sub">531ms 에서 79% 감소</span></div>
+        <div class="fig"><span class="lab">p95</span><span class="val acc">191<small>ms</small></span><span class="sub">963ms 에서 80% 감소</span></div>
+        <div class="fig"><span class="lab">최악</span><span class="val acc">254<small>ms</small></span><span class="sub">1,011ms 에서 75% 감소</span></div>
+      </div>
+      <p>
+        유저가 퀘스트를 완료하고 <strong>알림 카드를 받기까지의 대기가 평균 0.5초에서 0.1초로</strong> 줄었습니다.
+        측정값이 이론값(주기 ÷ 2 = 100ms)과 맞아떨어져, 지연의 원인이 폴링 대기라는 진단도 함께 확인됐습니다.
+      </p>
+      <p>
+        대가는 빈 폴링입니다 — <strong>하루 8.6만 회에서 43만 회로 5배</strong> 늘었습니다.
+        발행 대기 행만 담는 부분 인덱스가 16kB라 한 번의 조회가 인덱스 한 페이지만 읽고,
+        <strong>이 비용이라면 감수할 만하다고 판단했습니다.</strong>
+      </p>
+      <p class="note" style="margin-top:18px;margin-bottom:0">
+        <b>불만이 접수되어 고친 것이 아닙니다.</b> 처리량을 재다가 라운드 주기를 보고 지연을 확인한 것이고,
+        아웃박스 패턴이 원래 지연을 감수하는 구조라는 것도 알고 있습니다.
+        한 일은 <b>그 지연이 설계상 필연인지 설정값 때문인지를 가른 것</b>이고, 후자였습니다.
+      </p>
+    </div>
+
+    <div class="conditions">
+      <h4>테스트 조건</h4>
+      <dl>
+        <dt>측정 방법</dt><dd>1.3초 간격으로 41건 주입(발행기를 포화시키지 않음) · 지연 = <code>published_at − created_at</code></dd>
+        <dt>간격 선정</dt><dd>주입 1.3초 ↔ 주기 1.0초로 어긋나게 잡아 41건이 한 주기 안에 고르게 떨어지도록 함</dd>
+        <dt>비교군</dt><dd>poll-size 100 고정 · poll-interval 1,000ms → 200ms · 같은 스크립트 2회 실행</dd>
+        <dt>환경</dt><dd>PostgreSQL 16.14 (Docker · 리소스 제한 없음) · Kafka 단일 노드 파티션 3 · game-service 단독 기동</dd>
+      </dl>
+    </div>
+  </article>
+
+  <footer class="end">
+    수치는 전부 로컬 도커 환경의 실측값이며, 각 카드의 테스트 조건에 측정 방법을 함께 적었습니다.<br>
+    측정하지 않은 것은 “확인했다”고 쓰지 않았습니다 — 미검증 항목은 본문에 그대로 남겨 두었습니다.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  var before = [874,869,629,354,76,810,532,257,998,723,436,159,880,604,325,52,784,505,230,963,676,403,115,849,561,288,1011,727,446,166,888,613,334,46,772,497,221,957,671,386,98];
+  var after  = [254,253,67,66,64,38,32,186,164,162,151,138,129,132,119,107,95,77,66,69,42,191,153,157,112,98,59,33,18,183,154,144,118,108,86,72,37,187,132,78,71];
+
+  var X0 = 96, X1 = 672, MAX = 1100;
+  var ROW_B = 78, ROW_A = 172;
+
+  function x(ms) { return X0 + (ms / MAX) * (X1 - X0); }
+
+  var axis = document.getElementById('lat-axis');
+  var dots = document.getElementById('lat-dots');
+  if (!axis || !dots) return;
+
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(name, attrs, text) {
+    var n = document.createElementNS(NS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  [0, 200, 400, 600, 800, 1000].forEach(function (t) {
+    axis.appendChild(el('line', { x1: x(t), y1: 40, x2: x(t), y2: 214,
+      stroke: 'currentColor', 'stroke-width': 1, opacity: t === 0 ? 0.32 : 0.14, class: 'svg-line' }));
+    axis.appendChild(el('text', { x: x(t), y: 232, 'text-anchor': 'middle', class: 'svg-label dim' }, String(t)));
+  });
+
+  function row(vals, y, label, sub, cls, avg) {
+    axis.appendChild(el('text', { x: 0, y: y - 18, class: 'svg-label em' }, label));
+    axis.appendChild(el('text', { x: 0, y: y - 3, class: 'svg-label dim' }, sub));
+
+    vals.forEach(function (v, i) {
+      var jitter = ((i % 7) - 3) * 4.4;
+      dots.appendChild(el('circle', {
+        cx: x(v), cy: y + 16 + jitter, r: 3.4,
+        class: cls, 'fill-opacity': 0.55, 'stroke-width': 1
+      }));
+    });
+
+    dots.appendChild(el('line', {
+      x1: x(avg), y1: y - 2, x2: x(avg), y2: y + 42,
+      class: cls, 'stroke-width': 2
+    }));
+    dots.appendChild(el('text', {
+      x: x(avg) + 8, y: y + 54, class: 'svg-label ' + (cls === 'svg-box acc' ? 'acc' : 'bad')
+    }, '평균 ' + avg + 'ms'));
+  }
+
+  row(before, ROW_B, 'poll-interval 1,000ms', 'p95 963 · 최악 1,011', 'svg-box bad', 531);
+  row(after,  ROW_A, 'poll-interval 200ms',   'p95 191 · 최악 254',   'svg-box acc', 112);
+})();
+</script>
+</body>
+</html>
