@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>정각 동기화 처리 용량</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 파티 카운터 테스트 페이지와 같은 한 줄 칼럼. 질문 → 측정 방법 → 방법 교정 → 기준선 → 분해 → 해석. 무채색만 */
+
+:root {
+  --bg: #f5f6f7;
+  --paper: #ffffff;
+  --ink: #17191c;
+  --ink-2: #4d535a;
+  --muted: #858b92;
+  --line: #d8dce0;
+  --box: #f0f2f4;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+    --line: #2d3237; --box: #20252a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+  --line: #2d3237; --box: #20252a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--sans); font-size: 16px; line-height: 1.75;
+  -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: break-word;
+}
+.wrap { max-width: 780px; margin: 0 auto; padding-inline: 20px; padding-block: 0 96px; }
+
+header.top { padding-block: 56px 32px; border-bottom: 1px solid var(--line); }
+h1 { font-size: clamp(24px, 4.2vw, 32px); line-height: 1.35; font-weight: 600; margin: 0 0 16px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { display: grid; gap: 4px; color: var(--ink-2); max-width: 64ch; }
+.lede p { margin: 0; }
+
+article.card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 28px 28px 26px; margin-top: 28px; }
+.sec + .sec { margin-top: 30px; }
+.sec h2 { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: .04em; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.lines { display: grid; gap: 6px; max-width: 66ch; }
+.lines p { margin: 0; }
+.cap { font-size: 13.5px; color: var(--muted); margin: 14px 0 6px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--box); padding: 1px 5px; border-radius: 3px; }
+
+figure.fig { margin: 0 0 14px; border: 1px solid var(--line); border-radius: 4px; padding: 12px; overflow-x: auto; }
+figure.fig svg { display: block; width: 100%; min-width: 560px; height: auto; }
+svg .b { fill: var(--box); stroke: var(--line); stroke-width: 1; }
+svg .ar { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+svg .ah { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg .t { fill: var(--ink); font-size: 14px; font-weight: 600; font-family: var(--sans); }
+svg .s { fill: var(--ink-2); font-size: 12px; font-family: var(--sans); }
+
+pre.code {
+  margin: 0; padding: 14px 16px; background: var(--box); border-radius: 4px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.65; color: var(--ink);
+  overflow-x: auto; white-space: pre; tab-size: 4;
+}
+pre.code .c { color: var(--muted); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pair > div { min-width: 0; }
+@media (max-width: 680px) { .pair { grid-template-columns: 1fr; } }
+
+.env { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 4px; color: var(--ink-2); font-size: 14.5px; }
+.paths { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.paths li { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); overflow-x: auto; white-space: nowrap; }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 14px; margin: 4px 0 0; }
+table.t th, table.t td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t th { white-space: nowrap; font-weight: 500; color: var(--muted); font-size: 12.5px; }
+table.t td.n, table.t th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.t tr.em td { font-weight: 600; }
+table.t td.nw { white-space: nowrap; }
+.tw { overflow-x: auto; }
+.tw table.t { min-width: 520px; }
+.box2 { border: 1px solid var(--line); border-radius: 4px; padding: 12px 14px; }
+.box2 h3 { font-size: 14.5px; font-weight: 600; margin: 0 0 6px; }
+.box2 p { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+.box2 p + p { margin-top: 4px; }
+.bars { display: grid; gap: 8px; margin-top: 4px; }
+.bar { display: grid; grid-template-columns: minmax(0, 15em) minmax(0, 1fr) 4.2em; gap: 10px; align-items: center; font-size: 14px; }
+.bar .k { color: var(--ink-2); }
+.bar .track { height: 10px; background: var(--box); border-radius: 2px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--muted); }
+.bar.em .fill { background: var(--ink-2); }
+.bar.em .k { color: var(--ink); font-weight: 600; }
+.bar .v { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) { .bar { grid-template-columns: 1fr 3.8em; } .bar .track { grid-column: 1 / -1; grid-row: 2; } article.card { padding: 20px 16px; } }
+svg .g { fill: none; stroke: var(--line); stroke-width: 1; }
+svg .d { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+svg .bar1 { fill: var(--muted); }
+svg .bar2 { fill: var(--ink-2); }
+a { color: var(--ink); }
+.back { font-size: 13.5px; color: var(--muted); margin: 0 0 14px; }
+.back a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>정각 동기화 스파이크: 처리 용량 측정과 병목 분해</h1>
+    <div class="lede">
+      <p>한 주기(30분)에 76만~144만 명의 동기화를 처리할 수 있습니다.</p>
+      <p>이벤트 한 건의 처리 시간은 커밋 때 WAL을 디스크에 동기화하는 횟수에 비례했고, 행 잠금 대기는 0%였습니다.</p>
+    </div>
+  </header>
+
+  <article class="card">
+    <section class="sec">
+      <h2>질문</h2>
+      <div class="lines">
+        <p>정각에 한꺼번에 들어온 N건을 다음 정각(1,800초) 전에 다 처리하는지 확인했습니다.</p>
+        <p>Health는 30분마다 동기화하고, 다 처리하지 못하면 다음 정각분이 밀린 양 위에 또 쌓이기 때문입니다.</p>
+        <p>비동기 구조라 처리량은 API 응답 시간이 아니라, 컨슈머가 쌓인 이벤트를 소진하는 속도로 정의했습니다.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>측정 방법</h2>
+      <figure class="fig" aria-label="컨슈머를 멈춘 채 N건을 쌓고, 재개한 뒤 마지막 스냅샷이 저장될 때까지의 시간을 소진 시간으로 잰다">
+        <svg viewBox="0 0 680 120" role="img">
+          <defs>
+            <marker id="h" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M2 1 L8 5 L2 9" class="ah"/>
+            </marker>
+          </defs>
+          <rect class="b" x="6" y="10" width="150" height="62" rx="4"/>
+          <text class="t" x="81" y="36" text-anchor="middle">컨슈머 정지</text>
+          <text class="s" x="81" y="56" text-anchor="middle">docker pause</text>
+          <path class="ar" d="M158 41 L178 41" marker-end="url(#h)"/>
+          <rect class="b" x="180" y="10" width="150" height="62" rx="4"/>
+          <text class="t" x="255" y="36" text-anchor="middle">N건 적재</text>
+          <text class="s" x="255" y="56" text-anchor="middle">JMeter → health.events</text>
+          <path class="ar" d="M332 41 L352 41" marker-end="url(#h)"/>
+          <rect class="b" x="354" y="10" width="150" height="62" rx="4"/>
+          <text class="t" x="429" y="36" text-anchor="middle">컨슈머 재개</text>
+          <text class="s" x="429" y="56" text-anchor="middle">docker unpause</text>
+          <path class="ar" d="M506 41 L526 41" marker-end="url(#h)"/>
+          <rect class="b" x="528" y="10" width="146" height="62" rx="4"/>
+          <text class="t" x="601" y="36" text-anchor="middle">마지막 저장</text>
+          <text class="s" x="601" y="56" text-anchor="middle">스냅샷 updated_at</text>
+          <path class="d" d="M429 84 L429 96 L601 96 L601 84"/>
+          <text class="s" x="515" y="114" text-anchor="middle">소진 시간</text>
+        </svg>
+      </figure>
+      <div class="lines">
+        <p>이벤트는 HTTP가 아니라 Kafka 토픽에 직접 넣었습니다.</p>
+        <p>동기화 API를 거치면 앞단 Health의 AI 호출(4~16초)이 먼저 병목이 되어 Game의 컨슈머를 잴 수 없기 때문입니다.</p>
+        <p>컨슈머를 얼린 채 N건을 다 쌓은 뒤 풀어서, 다 처리할 때까지의 시간만 쟀습니다.</p>
+        <p>발행 속도와 처리 속도가 완전히 분리되고, "정각에 N건이 이미 쌓여 있다"는 최악의 순간이 그대로 재현되기 때문입니다.</p>
+      </div>
+      <p class="cap">주입 (run_spike.sh)</p>
+<pre class="code">docker pause "$GAME"                         <span class="c"># 컨슈머를 얼린다</span>
+jmeter "$MEAS" "$N" "$T" "${T:0:10}" main 1.5  <span class="c"># N건 발행</span>
+drain_start_ms=$(date +%s%3N)
+docker unpause "$GAME"                       <span class="c"># 여기서부터 소진 시간</span></pre>
+      <p class="cap">소진 시간 (03_result.sql)</p>
+<pre class="code">SELECT count(*)                                              AS processed,
+       (max(done_ms) - :drain_start_ms) / 1000.0              AS drain_sec,
+       count(*) / ((max(done_ms) - :drain_start_ms) / 1000.0) AS per_sec
+  FROM r;   <span class="c">-- r = 이번 회차 측정 유저의 스냅샷 저장 시각(updated_at)</span></pre>
+    </section>
+
+    <section class="sec">
+      <h2>측정 방법이 두 번 바뀐 이유</h2>
+      <div class="lines">
+        <p>처음 두 회차는 컨슈머가 아니라 다른 것을 재고 있었습니다.</p>
+      </div>
+      <div class="tw" style="margin-top:12px">
+        <table class="t">
+          <thead><tr><th>회차</th><th class="n">발행</th><th class="n">소진</th><th>판단</th></tr></thead>
+          <tbody>
+            <tr><td>S0 · 1,000건 · JMeter 반복 1,000회</td><td class="n">5.20초</td><td class="n">5.39초</td><td>소진이 발행을 0.19초 차로 따라감 → 부하 도구(0.5코어)가 병목</td></tr>
+            <tr><td>S0 · 5,000건 · 샘플 1개 안에서 반복</td><td class="n">9.21초</td><td class="n">14.86초</td><td>쌓이긴 했지만 발행 중 처리와 발행 후 처리가 섞여 처리량을 못 읽음</td></tr>
+            <tr class="em"><td>이후 전부 · 컨슈머 정지 후 적재</td><td class="n">0.6~1.0초</td><td class="n">아래 표</td><td>발행 속도와 소진 속도가 완전히 분리됨</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>시나리오: 경로의 양 끝</h2>
+      <div class="lines">
+        <p>실제 사용자 비율은 근거가 없어 임의로 정하지 않고, 가장 가벼운 경우와 가장 무거운 경우를 쟀습니다.</p>
+        <p>어떤 비율이든 이 두 값 사이에 든다고 말할 수 있기 때문입니다.</p>
+      </div>
+      <div class="tw" style="margin-top:12px">
+        <table class="t">
+          <thead><tr><th>시나리오</th><th>시드</th><th>이벤트 한 건이 타는 경로</th></tr></thead>
+          <tbody>
+            <tr><td class="nw">S0 가벼운 끝</td><td>유저만, 퀘스트 없음</td><td>스냅샷 조회 · 저장 → 퀘스트 없음 → 파티 퀘스트 없음</td></tr>
+            <tr><td class="nw">S2 무거운 끝</td><td>전원 개인 퀘스트 + 4인 파티 퀘스트 진행 중</td><td>위 경로 + 퀘스트 판정 · 갱신 + 멤버 행 · 공유 카운터 갱신 + 완료 선점 시도</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>기준선</h2>
+      <div class="tw">
+        <table class="t">
+          <thead><tr><th>시나리오</th><th class="n">N</th><th class="n">소진</th><th class="n">초당 처리</th><th class="n">스레드당 건당</th><th class="n">대기 p95</th></tr></thead>
+          <tbody>
+            <tr><td>S0 가벼운 끝</td><td class="n">5,000</td><td class="n">7.2초</td><td class="n">696</td><td class="n">4.3ms</td><td class="n">6.7초</td></tr>
+            <tr class="em"><td>S0 가벼운 끝</td><td class="n">20,000</td><td class="n">25.0초</td><td class="n">800</td><td class="n">3.7ms</td><td class="n">23.7초</td></tr>
+            <tr class="em"><td>S2 무거운 끝</td><td class="n">20,000</td><td class="n">47.3초</td><td class="n">423</td><td class="n">7.1ms</td><td class="n">45.0초</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="lines" style="margin-top:14px">
+        <p>30분이면 S0 기준 약 144만 명, S2 기준 약 76만 명을 처리합니다.</p>
+        <p>초당 800건 × 1,800초, 초당 423건 × 1,800초이기 때문입니다.</p>
+        <p>앞선 실험 로그에서 보였던 건당 0.6초는 실제 값이 아니었습니다.</p>
+        <p>워밍업 500건을 먼저 넣은 뒤 잰 스레드당 건당 시간은 3.7~7.1ms였기 때문입니다.</p>
+        <p>S2에서도 정합성은 맞았습니다. 개인 판정 20,000 · 파티 멤버 판정 20,000 · 공유 카운터 5,000개가 움직였고, 카운터와 멤버 기여분 합계가 어긋난 파티는 0개였습니다.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>병목 분해 (S2 · 20,000건)</h2>
+      <div class="lines">
+        <p>두 시나리오 모두 CPU가 남았습니다(2코어 중 약 1.2코어 사용).</p>
+        <p>그래서 스레드가 계산이 아니라 무언가를 기다리고 있다고 보고, 무엇을 기다리는지 세 방향에서 쟀습니다.</p>
+      </div>
+
+      <p class="cap">A. 이벤트 한 건당 DB 작업 (통계 증감 ÷ 20,000)</p>
+      <div class="tw">
+        <table class="t">
+          <thead><tr><th>항목</th><th class="n">건당</th><th>뜻</th></tr></thead>
+          <tbody>
+            <tr class="em"><td>커밋</td><td class="n">2.07</td><td>트랜잭션 2개 (개인 · 파티)</td></tr>
+            <tr><td>인덱스 조회</td><td class="n">약 10</td><td>스냅샷 2 · 퀘스트 2 · 파티 퀘스트 3 · 파티 멤버 3</td></tr>
+            <tr><td>UPDATE</td><td class="n">4.0</td><td>스냅샷 · 퀘스트 · 멤버 · 파티 카운터 각 1</td></tr>
+            <tr><td>디스크 읽기</td><td class="n">0.00</td><td>전부 메모리에서 읽음. 조회는 병목이 아님</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="cap">B. 리스너 스레드가 하고 있던 일 (스레드 덤프 18회 × 3스레드)</p>
+      <div class="bars">
+        <div class="bar"><span class="k">DB 쿼리 응답 대기</span><span class="track"><span class="fill" style="display:block;width:42.6%"></span></span><span class="v">42.6%</span></div>
+        <div class="bar em"><span class="k">DB 커밋 대기</span><span class="track"><span class="fill" style="display:block;width:29.6%"></span></span><span class="v">29.6%</span></div>
+        <div class="bar"><span class="k">애플리케이션 코드</span><span class="track"><span class="fill" style="display:block;width:16.7%"></span></span><span class="v">16.7%</span></div>
+        <div class="bar"><span class="k">Kafka 오프셋 커밋</span><span class="track"><span class="fill" style="display:block;width:7.4%"></span></span><span class="v">7.4%</span></div>
+      </div>
+
+      <p class="cap" style="margin-top:20px">C. DB 세션이 기다린 것 (pg_stat_activity 샘플)</p>
+      <div class="bars">
+        <div class="bar em"><span class="k">WAL 디스크 동기화 (WALSync · WALWrite)</span><span class="track"><span class="fill" style="display:block;width:58.5%"></span></span><span class="v">58.5%</span></div>
+        <div class="bar"><span class="k">앱의 다음 명령 대기 (JPA 왕복)</span><span class="track"><span class="fill" style="display:block;width:34.1%"></span></span><span class="v">34.1%</span></div>
+        <div class="bar"><span class="k">행 잠금</span><span class="track"><span class="fill" style="display:block;width:0%"></span></span><span class="v">0%</span></div>
+      </div>
+      <ul class="env">
+        <li>분해 회차는 스레드 덤프와 샘플링이 처리량을 깎아서, 숫자를 기준선과 비교하지 않았습니다.</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2>해석</h2>
+      <figure class="fig" aria-label="S0는 디스크 동기화 커밋이 건당 1회라 3.7ms, S2는 2회라 7.1ms">
+        <svg viewBox="0 0 680 128" role="img">
+          <text class="s" x="10" y="38">S0 가벼운 끝</text>
+          <rect class="b" x="120" y="20" width="250" height="30" rx="4"/>
+          <text class="s" x="245" y="40" text-anchor="middle">개인 트랜잭션 · WAL 동기화</text>
+          <rect class="b" x="376" y="20" width="110" height="30" rx="4"/>
+          <text class="s" x="431" y="40" text-anchor="middle">파티 · 조회만</text>
+          <text class="t" x="496" y="40">3.7ms</text>
+
+          <text class="s" x="10" y="98">S2 무거운 끝</text>
+          <rect class="b" x="120" y="80" width="250" height="30" rx="4"/>
+          <text class="s" x="245" y="100" text-anchor="middle">개인 트랜잭션 · WAL 동기화</text>
+          <rect class="b" x="376" y="80" width="250" height="30" rx="4"/>
+          <text class="s" x="501" y="100" text-anchor="middle">파티 트랜잭션 · WAL 동기화</text>
+          <text class="t" x="636" y="100">7.1ms</text>
+        </svg>
+      </figure>
+      <div class="lines">
+        <p>병목은 커밋할 때 PostgreSQL이 WAL을 디스크(EBS)에 동기화하는 시간이었습니다.</p>
+        <p>S0은 파티 트랜잭션이 조회만 하고 끝나 WAL을 쓰지 않아 디스크 동기화 커밋이 건당 1회이고, S2는 두 트랜잭션 모두 UPDATE가 있어 2회입니다.</p>
+        <p>건당 시간이 이 횟수에 거의 비례했고(3.7ms → 7.1ms), CPU가 남는 것과도 맞습니다.</p>
+        <p>파티 공유 행 경합은 병목이 아니었습니다. 행 잠금 대기가 0%였기 때문입니다.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>환경</h2>
+      <ul class="env">
+        <li>배포 서버: EC2 · 2 vCPU · 메모리 7.6GB · 스왑 없음 · 컨테이너 19개</li>
+        <li>Kafka <code>health.events</code> 파티션 3 · 컨슈머 스레드 3 · 키는 userId</li>
+        <li>주입: JMeter 5.6.3(kafka-clients)를 같은 Docker 네트워크의 컨테이너로 실행, 메모리 768MB · 워밍업 0.5코어 · 본 주입 1.5코어(컨슈머가 얼어 있는 동안)</li>
+        <li>워밍업: 다른 유저 500건을 먼저 처리해 JIT · 커넥션 풀 콜드 스타트 제거</li>
+        <li>관측: 진행은 2초마다 DB 카운트, lag은 시작 전 · 끝난 뒤에만 확인(<code>kafka-consumer-groups.sh</code>가 호출마다 JVM을 띄워 측정을 오염시키므로)</li>
+        <li>실행일: 2026-09-28</li>
+      </ul>
+      <p class="cap">원본 위치 (실험 폴더 부하_동기화스파이크/)</p>
+      <ul class="paths">
+        <li>README.md — 설계 · 결과 기록 · 분해</li>
+        <li>run_spike.sh · setup.sh · sync_spike.jmx — 한 회차 실행</li>
+        <li>01_seed_S0.sql · 01_seed_S2.sql · 99_cleanup.sql — 시나리오 데이터</li>
+        <li>03_result.sql · pg_snapshot.sql · breakdown.py — 결과 · 분해</li>
+      </ul>
+    </section>
+  </article>
+</div>
+</body>
+</html>
