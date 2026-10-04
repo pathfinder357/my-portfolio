@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>파티 카운터 경합 테스트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 포트폴리오 본문과 같은 한 줄 칼럼. 상황 도식 → 비교한 UPDATE → 끼어들기 재현 → 단언 → 결과. 무채색 박스만 */
+:root {
+  --bg: #f5f6f7;
+  --paper: #ffffff;
+  --ink: #17191c;
+  --ink-2: #4d535a;
+  --muted: #858b92;
+  --line: #d8dce0;
+  --box: #f0f2f4;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+    --line: #2d3237; --box: #20252a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+  --line: #2d3237; --box: #20252a; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--sans); font-size: 16px; line-height: 1.75;
+  -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: break-word;
+}
+.wrap { max-width: 780px; margin: 0 auto; padding-inline: 20px; padding-block: 0 96px; }
+
+header.top { padding-block: 56px 32px; border-bottom: 1px solid var(--line); }
+h1 { font-size: clamp(24px, 4.2vw, 32px); line-height: 1.35; font-weight: 600; margin: 0 0 16px; text-wrap: balance; letter-spacing: -.01em; }
+.lede { display: grid; gap: 4px; color: var(--ink-2); max-width: 64ch; }
+.lede p { margin: 0; }
+
+article.card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 28px 28px 26px; margin-top: 28px; }
+.sec + .sec { margin-top: 30px; }
+.sec h2 { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: .04em; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.lines { display: grid; gap: 6px; max-width: 66ch; }
+.lines p { margin: 0; }
+.cap { font-size: 13.5px; color: var(--muted); margin: 14px 0 6px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--box); padding: 1px 5px; border-radius: 3px; }
+
+figure.fig { margin: 0 0 14px; border: 1px solid var(--line); border-radius: 4px; padding: 12px; overflow-x: auto; }
+figure.fig svg { display: block; width: 100%; min-width: 560px; height: auto; }
+svg .b { fill: var(--box); stroke: var(--line); stroke-width: 1; }
+svg .ar { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+svg .ah { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg .t { fill: var(--ink); font-size: 14px; font-weight: 600; font-family: var(--sans); }
+svg .s { fill: var(--ink-2); font-size: 12px; font-family: var(--sans); }
+
+pre.code {
+  margin: 0; padding: 14px 16px; background: var(--box); border-radius: 4px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.65; color: var(--ink);
+  overflow-x: auto; white-space: pre; tab-size: 4;
+}
+pre.code .c { color: var(--muted); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pair > div { min-width: 0; }
+@media (max-width: 680px) { .pair { grid-template-columns: 1fr; } }
+
+.env { margin: 12px 0 0; padding-left: 20px; display: grid; gap: 4px; color: var(--ink-2); font-size: 14.5px; }
+.paths { margin: 8px 0 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.paths li { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); overflow-x: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>공유 카운터에 상태 조건을 걸지 않은 이유</h1>
+    <div class="lede">
+      <p>카운터 UPDATE에 상태 조건을 걸면, 완료 직후 도착한 기여가 0행으로 버려져 멤버 기여분 합계와 카운터가 어긋납니다.</p>
+      <p>두 트랜잭션이 끼어드는 순서를 실제 PostgreSQL에서 재현하고, 지금 코드와 상태 조건을 건 UPDATE를 같은 순서로 비교했습니다.</p>
+    </div>
+  </header>
+
+  <article class="card">
+    <section class="sec">
+      <h2>상황</h2>
+      <figure class="fig" aria-label="A 트랜잭션이 멤버 행을 반영한 뒤 D 트랜잭션이 완료를 선점하고, 그다음 A가 카운터를 올리는 순서와 두 결과">
+        <svg viewBox="0 0 680 252" role="img">
+          <defs>
+            <marker id="h" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M2 1 L8 5 L2 9" class="ah"/>
+            </marker>
+          </defs>
+          <rect class="b" x="10" y="8" width="200" height="78" rx="4"/>
+          <text class="t" x="110" y="34" text-anchor="middle">A 트랜잭션</text>
+          <text class="s" x="110" y="56" text-anchor="middle">퀘스트를 ACTIVE로 읽음</text>
+          <text class="s" x="110" y="73" text-anchor="middle">멤버 행 +500</text>
+
+          <path class="ar" d="M212 47 L238 47" marker-end="url(#h)"/>
+
+          <rect class="b" x="240" y="8" width="200" height="78" rx="4"/>
+          <text class="t" x="340" y="34" text-anchor="middle">D 트랜잭션</text>
+          <text class="s" x="340" y="56" text-anchor="middle">카운터 +1,000 · 완료 선점</text>
+          <text class="s" x="340" y="73" text-anchor="middle">커밋</text>
+
+          <path class="ar" d="M442 47 L468 47" marker-end="url(#h)"/>
+
+          <rect class="b" x="470" y="8" width="200" height="78" rx="4"/>
+          <text class="t" x="570" y="34" text-anchor="middle">A 트랜잭션</text>
+          <text class="s" x="570" y="56" text-anchor="middle">카운터 +500</text>
+          <text class="s" x="570" y="73" text-anchor="middle">완료 선점 시도</text>
+
+          <path class="ar" d="M570 88 L570 122 L265 122 L265 160" marker-end="url(#h)"/>
+          <path class="ar" d="M570 122 L545 122 L545 160" marker-end="url(#h)"/>
+
+          <rect class="b" x="140" y="162" width="250" height="80" rx="4"/>
+          <text class="t" x="265" y="188" text-anchor="middle">상태 조건 없음 · 지금 코드</text>
+          <text class="s" x="265" y="210" text-anchor="middle">1행 반영 · 카운터 4,500</text>
+          <text class="s" x="265" y="228" text-anchor="middle">멤버 기여분 합계 4,500과 같음</text>
+
+          <rect class="b" x="420" y="162" width="250" height="80" rx="4"/>
+          <text class="t" x="545" y="188" text-anchor="middle">상태 조건 있음 · 트레이드오프 A</text>
+          <text class="s" x="545" y="210" text-anchor="middle">0행 · 카운터 4,000</text>
+          <text class="s" x="545" y="228" text-anchor="middle">멤버 기여분 합계 4,500과 어긋남</text>
+        </svg>
+      </figure>
+      <div class="lines">
+        <p>파티 목표는 4,000이고, 멤버 4명의 기준값은 모두 1,000입니다.</p>
+        <p>A · B · C가 1,000씩 기여해 카운터는 3,000인 상태에서 시작합니다.</p>
+        <p>A가 카운터를 올리기 직전에 D가 완료를 가져가는 순간이 문제입니다.</p>
+        <p>A는 이미 퀘스트를 ACTIVE로 읽고 자기 멤버 행을 고쳤기 때문에, 이 기여는 카운터에도 들어가야 합니다.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>비교한 두 UPDATE</h2>
+      <div class="lines">
+        <p>카운터를 올리는 문장만 바꾸고, 나머지 절차는 같습니다.</p>
+        <p>완료 여부는 두 경우 모두 아래의 조건부 UPDATE 한 곳에서만 정합니다.</p>
+      </div>
+      <div class="pair" style="margin-top:14px">
+        <div>
+          <p class="cap">지금 코드</p>
+<pre class="code">update PartyQuest q
+   set q.currentVal = q.currentVal + :delta
+ where q.partyQuestId = :partyQuestId</pre>
+        </div>
+        <div>
+          <p class="cap">트레이드오프 A</p>
+<pre class="code">update game_service.party_quests
+   set current_val = current_val + :delta
+ where party_quest_id = :id
+   and status = 'ACTIVE'</pre>
+        </div>
+      </div>
+      <p class="cap">완료 선점 (두 경우 공통)</p>
+<pre class="code">update PartyQuest q set q.status = :completed
+ where q.partyQuestId = :partyQuestId
+   and q.status = :active
+   and q.expiredAt &gt; :at
+   and q.currentVal &gt;= q.targetVal</pre>
+    </section>
+
+    <section class="sec">
+      <h2>끼어들기 재현</h2>
+      <div class="lines">
+        <p>A 트랜잭션 안에서 D 트랜잭션을 다른 스레드로 끝까지 실행해, 끼어드는 순서를 매번 같게 고정했습니다.</p>
+        <p>두 트랜잭션이 잡는 행이 겹치지 않아 서로 기다리지 않습니다.</p>
+        <p>A는 자기 멤버 행만, D는 자기 멤버 행과 카운터 행을 갱신하기 때문입니다.</p>
+      </div>
+<pre class="code" style="margin-top:14px">Outcome aOutcome = tx.execute(s -&gt; {
+    <span class="c">// 1. A는 퀘스트를 ACTIVE로 읽고 자기 멤버 행에 +500을 반영한다</span>
+    assertThat(partyQuestJpa.findActiveByUserId(a, ACTIVE, at(10, 30))).isNotEmpty();
+    int delta = applyToMember(questId, a, 2_500, at(10, 30));
+
+    <span class="c">// 2. A가 카운터를 올리기 전에 D가 다른 트랜잭션에서 완료를 선점하고 커밋한다</span>
+    dOutcome[0] = other.submit(() -&gt; contribute(tx, counter, questId, d, 2_000, at(10, 3))).get();
+
+    <span class="c">// 3. A가 카운터를 올리고 완료 선점을 시도한다</span>
+    int rows = counter.add(questId, delta);
+    int claimed = partyQuestJpa.claimCompletion(questId, at(10, 30), ACTIVE, COMPLETED);
+    return new Outcome(rows, claimed);
+});</pre>
+    </section>
+
+    <section class="sec">
+      <h2>단언</h2>
+      <div class="pair">
+        <div>
+          <p class="cap">상태 조건이 없으면 합계가 맞는다</p>
+<pre class="code">Race race = runRace(current());
+
+assertThat(race.d().claimed()).isEqualTo(1);
+assertThat(race.a().counterRows()).isEqualTo(1);
+assertThat(race.a().claimed()).isEqualTo(0);
+
+PartyQuest after = readQuest(race.questId());
+assertThat(after.getStatus()).isEqualTo(COMPLETED);
+assertThat(after.getCurrentVal()).isEqualTo(4_500);
+assertThat(sumOfContributions(race.questId()))
+        .isEqualTo(after.getCurrentVal());</pre>
+        </div>
+        <div>
+          <p class="cap">상태 조건을 걸면 합계가 어긋난다</p>
+<pre class="code">Race race = runRace(guarded());
+
+assertThat(race.d().claimed()).isEqualTo(1);
+assertThat(race.a().counterRows()).isEqualTo(0);
+
+PartyQuest after = readQuest(race.questId());
+assertThat(after.getCurrentVal()).isEqualTo(4_000);
+assertThat(sumOfContributions(race.questId()))
+        .isEqualTo(4_500);</pre>
+        </div>
+      </div>
+      <div class="lines" style="margin-top:14px">
+        <p>왼쪽은 지금 코드가 맞다는 단언입니다.</p>
+        <p>A의 +500이 카운터에 들어가고, A의 완료 선점은 0행이라 보상도 한 번만 나갑니다.</p>
+        <p>오른쪽은 트레이드오프 A가 실제로 어긋난다는 단언입니다.</p>
+        <p>이 테스트가 통과한다는 것은 A의 +500이 버려지는 것을 재현했다는 뜻입니다.</p>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>결과</h2>
+      <div class="lines">
+        <p>두 테스트 모두 통과했습니다.</p>
+        <p>같은 끼어들기에서 지금 코드는 카운터와 멤버 기여분 합계가 4,500으로 같았고, 상태 조건을 건 UPDATE는 4,000과 4,500으로 어긋났습니다.</p>
+      </div>
+      <ul class="env">
+        <li>DB: PostgreSQL 16 (Testcontainers <code>postgres:16-alpine</code>), Flyway 마이그레이션 적용</li>
+        <li>범위: <code>@DataJpaTest</code>, 테스트 트랜잭션 끔(두 트랜잭션이 서로의 커밋을 봐야 하므로)</li>
+      </ul>
+      <p class="cap">원본 위치 (game-service)</p>
+      <ul class="paths">
+        <li>src/test/java/com/workoutdone/rpgym/game/quest/adapter/out/persistence/PartyQuestCounterRaceTest.java</li>
+        <li>src/main/java/com/workoutdone/rpgym/game/quest/adapter/out/persistence/PartyQuestJpaRepository.java</li>
+      </ul>
+    </section>
+  </article>
+</div>
+</body>
+</html>
