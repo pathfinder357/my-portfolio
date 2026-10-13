@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kafka 이벤트 기반 시스템에서 숨은 장애와 유실을 잡은 과정</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --text: #1f1f1f;
+  --muted: #5f5f5f;
+  --line: #e2e2e2;
+  --soft: #f6f6f4;
+  --accent: #2f5d8a;
+  --code-bg: #f1f1ef;
+  --measure: 720px;
+  --wide: 1040px;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--text);
+  font-family: 'Noto Sans KR', system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.85;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+.post {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 72px 20px 120px;
+}
+.post-header { margin-bottom: 56px; }
+.post-header h1 {
+  margin: 0 0 16px;
+  font-size: 34px;
+  line-height: 1.35;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.byline { margin: 0; color: var(--muted); font-size: 15px; }
+
+h2 {
+  margin: 80px 0 24px;
+  padding-top: 32px;
+  border-top: 1px solid var(--line);
+  font-size: 26px;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+h3 { margin: 56px 0 16px; font-size: 21px; line-height: 1.45; }
+h4 { margin: 40px 0 12px; font-size: 18px; line-height: 1.5; }
+p { margin: 0 0 18px; }
+ul { margin: 0 0 18px; padding-left: 22px; }
+li { margin: 4px 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { color: #1d3f61; }
+code {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* 설계상 보장 / 실제 장애 / 결론 */
+.label {
+  display: inline-block;
+  margin: 28px 0 12px;
+  padding: 2px 10px;
+  border: 1px solid #c9c9c9;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.8;
+  color: #3a3a3a;
+}
+.label.result { background: var(--text); border-color: var(--text); color: #ffffff; }
+.conclusion {
+  margin: 0 0 18px;
+  padding: 18px 22px;
+  background: var(--soft);
+  border-radius: 10px;
+}
+.conclusion p:last-child { margin-bottom: 0; }
+
+.ref { font-size: 14px; color: var(--muted); }
+
+table {
+  width: 100%;
+  margin: 8px 0 18px;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.6;
+}
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { font-weight: 700; border-bottom: 2px solid #cfcfcf; white-space: nowrap; }
+td:first-child { white-space: nowrap; color: var(--muted); }
+
+/* 도식: 1040px 원본을 화면 폭에 맞춰 줄인다 */
+figure.diagram {
+  margin: 8px 0 28px;
+  width: min(var(--wide), calc(100vw - 40px));
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+}
+figure.diagram .stage { width: 1040px; transform-origin: top left; }
+figure.diagram .stage > div { font-family: 'Noto Sans KR', system-ui, sans-serif; }
+
+@media (max-width: 600px) {
+  body { font-size: 16px; }
+  .post { padding-top: 48px; }
+  .post-header h1 { font-size: 27px; }
+  h2 { font-size: 22px; }
+  h3 { font-size: 19px; }
+  td:first-child { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<article class="post">
+
+<header class="post-header">
+  <h1>Kafka 이벤트 기반 시스템에서 숨은 장애와 유실을 잡은 과정</h1>
+  <p class="byline">2026-10-13 · 최유준</p>
+</header>
+
+<section>
+<h2>1. 프롤로그</h2>
+<p>이벤트 기반 아키텍처를 도입할 때 우리는 흔히 <strong>'Kafka를 쓰니까, Outbox 패턴을 적용했으니까 안전하겠지'</strong>라고 생각합니다. 저 역시 컨슈머가 멈추면 울릴 알림까지 넣어 두고, 실제로 울리는지는 한 번도 확인하지 않았습니다.</p>
+<p>하지만 브로커가 죽거나 서비스가 갑자기 다운되는 것처럼, 코드로는 막을 수 없는 장애가 나도 메시지는 단 한 건도 유실되지 않을까요? 멈췄다면 알림은 제대로 울릴까요? 울렸다면 어디서, 왜 멈췄는지 찾아갈 수 있을까요?</p>
+<p>이 글에서는 제가 맡은 Game 서비스(운동 기록 이벤트를 받아 퀘스트를 판정하고 XP를 지급하는 서비스)에서 Kafka 브로커 3대 중 2대를 끄고, Outbox 발행기를 전송 도중 강제 종료하며 정말 유실이 0인지 확인했습니다. 그리고 시스템은 멈췄는데 지표는 정상이라고 말하던 모니터링의 허점을 지표 · 로그 · 트레이스 순서로 잡은 과정을 정리합니다.</p>
+</section>
+
+<section>
+<h2>2. 설계상 보장이 정말 유실을 없앨까?</h2>
+
+<h3>2-1. 브로커 3대 중 2대가 죽으면</h3>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="2-1 설계상 보장 도식" style="height:560px"><div class="stage" data-h="560">
+<div style="position: relative; width: 1040px; height: 560px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 236px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-Main-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-Main-1)"></path></svg>
+<svg width="72" height="8" viewBox="0 0 72 8" preserveAspectRatio="none" style="position: absolute; left: 528px; top: 236px; width: 72px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 72 4"></path></svg>
+<svg width="8" height="136" viewBox="0 0 8 136" preserveAspectRatio="none" style="position: absolute; left: 596px; top: 172px; width: 8px; height: 136px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 4 0 L 4 136"></path></svg>
+<svg width="71" height="8" viewBox="0 0 71 8" preserveAspectRatio="none" style="position: absolute; left: 600px; top: 168px; width: 71px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-Main-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 67 4" marker-end="url(#ah-Main-2)"></path></svg>
+<svg width="71" height="8" viewBox="0 0 71 8" preserveAspectRatio="none" style="position: absolute; left: 600px; top: 304px; width: 71px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-Main-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 67 4" marker-end="url(#ah-Main-3)"></path></svg>
+<svg width="8" height="103" viewBox="0 0 8 103" preserveAspectRatio="none" style="position: absolute; left: 428px; top: 280px; width: 8px; height: 103px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-Main-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 99" marker-end="url(#ah-Main-4)"></path></svg>
+<div style="position: absolute; left: 64px; top: 200px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>보내는 쪽<br>(Health)</span></div>
+<div style="position: absolute; left: 336px; top: 200px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>브로커 1<br><b>리더</b></span></div>
+<div style="position: absolute; left: 672px; top: 136px; width: 176px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>브로커 2<br>복제본</span></div>
+<div style="position: absolute; left: 672px; top: 272px; width: 176px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>브로커 3<br>복제본</span></div>
+<div style="position: absolute; left: 336px; top: 384px; width: 192px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game<br>(컨슈머)</span></div>
+<div style="position: absolute; left: 268px; top: 212px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">쓰기</div>
+<div style="position: absolute; left: 544px; top: 212px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">복제</div>
+<div style="position: absolute; left: 444px; top: 324px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">읽기</div>
+<div style="position: absolute; left: 672px; top: 392px; width: 304px; font-size: 14px; line-height: 22px; color: #444444">· 3대 모두에 복제<br>· 2대 이상 기록돼야 성공<br>&nbsp;&nbsp;(min.insync.replicas=2)<br>· 덜 복제된 브로커는 리더 불가</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: 3대에 복제하고, 2대 이상 기록돼야 성공</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">예상: 1대가 죽어도 계속 돌고, 2대가 죽으면 쓰기가 실패해 Outbox에 쌓이고 알림이 울린다</div>
+</div>
+</div></figure>
+<p>Game이 쓰던 Kafka는 브로커가 한 대였습니다. 이 한 대가 디스크째 망가지면, 아직 아무도 읽지 않은 이벤트도 함께 사라집니다.</p>
+<p>운영 서버는 메모리 때문에 한 대를 유지하고, 로컬에 3대 구성을 따로 만들어 실험했습니다.</p>
+<ul>
+  <li>모든 메시지를 3대에 복제한다 (replication factor 3)</li>
+  <li>최소 2대에 기록돼야 쓰기 성공으로 친다 (min.insync.replicas=2)</li>
+  <li>복제가 덜 된 브로커는 리더가 될 수 없다 (unclean leader election 끔)</li>
+</ul>
+<p>이론대로라면 1대가 죽어도 서비스는 계속되고, 2대가 죽으면 쓰기가 실패해야 합니다. 쓰기가 실패하면 보내는 쪽 Outbox에 미발행 메시지가 쌓이고, Outbox 알림이 울릴 거라고 예상했습니다.</p>
+
+<span class="label">실제 장애</span>
+<figure class="diagram" role="img" aria-label="2-1 실제 장애 도식" style="height:600px"><div class="stage" data-h="600">
+<div style="position: relative; width: 1040px; height: 600px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 236px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s21_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s21_actual-1)"></path></svg>
+<svg width="72" height="8" viewBox="0 0 72 8" preserveAspectRatio="none" style="position: absolute; left: 528px; top: 236px; width: 72px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 72 4"></path></svg>
+<svg width="8" height="136" viewBox="0 0 8 136" preserveAspectRatio="none" style="position: absolute; left: 596px; top: 172px; width: 8px; height: 136px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 136"></path></svg>
+<svg width="72" height="8" viewBox="0 0 72 8" preserveAspectRatio="none" style="position: absolute; left: 600px; top: 168px; width: 72px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 72 4"></path></svg>
+<svg width="72" height="8" viewBox="0 0 72 8" preserveAspectRatio="none" style="position: absolute; left: 600px; top: 304px; width: 72px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 72 4"></path></svg>
+<svg width="8" height="104" viewBox="0 0 8 104" preserveAspectRatio="none" style="position: absolute; left: 428px; top: 296px; width: 8px; height: 104px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 104"></path></svg>
+<div style="position: absolute; left: 64px; top: 200px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>보내는 쪽<br>acks=1</span></div>
+<div style="position: absolute; left: 336px; top: 184px; width: 192px; height: 112px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>브로커 1 <b>리더</b><br>20건 기록됨<br>확정선은 그대로</span></div>
+<div style="position: absolute; left: 672px; top: 136px; width: 176px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #666666"><span>브로커 2<br>꺼짐</span></div>
+<div style="position: absolute; left: 672px; top: 272px; width: 176px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #666666"><span>브로커 3<br>꺼짐</span></div>
+<div style="position: absolute; left: 336px; top: 400px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game (컨슈머)<br>받은 이벤트 0건</span></div>
+<div style="position: absolute; left: 252px; top: 212px; width: 72px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">20건 성공</div>
+<div style="position: absolute; left: 532px; top: 252px; width: 60px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">복제 불가</div>
+<div style="position: absolute; left: 444px; top: 340px; width: 56px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">못 읽음</div>
+<div style="position: absolute; left: 672px; top: 400px; width: 304px; font-size: 14px; line-height: 22px; color: #444444">· 서비스 로그에 에러 · 알림 없음<br>· 브로커를 켤 때까지 멈춤 (이번엔 9분)<br>· 켜자 16초 만에 20건 처리, 유실 0</div>
+<div style="position: absolute; left: 64px; top: 512px; width: 912px; font-size: 14px; line-height: 22px; color: #444444">복제본이 min.insync.replicas(2)보다 적어 리더가 확정선(high watermark)을 올리지 않은 것으로 추정. 컨슈머는 확정선 아래만 읽는다.</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제 장애: 쓰기는 성공했는데 읽기가 멈췄다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">브로커 2 · 3을 끄자 리더가 모두 브로커 1로 넘어갔고, 20건은 브로커 1에만 기록됐다</div>
+</div>
+</div></figure>
+<p>1대는 예상대로였습니다. 끈 브로커가 리더이던 파티션은 리더가 바로 다른 브로커로 넘어갔고, 그동안 들어온 100건이 모두 처리됐습니다. 유실 0, 중복 지급 0이었습니다.</p>
+<p>2대는 예상과 달랐습니다. 처음에 리더는 세 브로커에 고르게 나뉘어 있었고, 2대를 끄자 그 둘이 맡던 파티션의 리더가 모두 남은 한 대로 넘어갔습니다. 이 상태에서 이벤트 20건을 보냈는데, 쓰기는 실패하지 않았습니다. 실험 도구가 acks=1(리더에만 기록되면 성공)로 보냈기 때문입니다.</p>
+<p>그런데 Game은 이 20건을 한 건도 받지 못했습니다. 서비스 로그에는 에러도 리밸런스도 없었고, 꺼진 브로커를 다시 켤 때까지(이번 실험에서는 9분) 그대로 멈춰 있었습니다. 브로커 한 대를 다시 켜자, 그 브로커가 20건을 복제해 간 뒤 16초 만에 모두 처리됐습니다. 유실과 중복은 0이었습니다.</p>
+<p>원인은 이렇게 보고 있습니다. 컨슈머는 high watermark, 즉 충분히 복제됐다고 확정된 위치까지만 읽을 수 있습니다. 실험에 쓴 Kafka 4.3.1(ELR이 4.1부터 새 클러스터 기본값)에서는 살아 있는 복제본이 min.insync.replicas보다 적으면 리더가 이 선을 올리지 않습니다(ELR). 20건은 리더 한 곳에만 있었기 때문에 확정되지 못했고, 그래서 컨슈머에게 보이지 않았습니다. 토픽 상태의 ELR 표시, 서비스 로그에 오류가 없었던 점, 복제가 회복되자마자 처리된 점을 근거로 한 추정입니다.</p>
+<p class="ref">참고: <a href="https://kafka.apache.org/43/operations/eligible-leader-replicas/">Apache Kafka 4.3 문서 · Eligible Leader Replicas</a></p>
+<p>Kafka가 한 곳에만 있는 데이터라도 읽게 해 줬다면 어땠을까요? Game은 그 이벤트로 XP를 지급했을 것이고, 직후에 그 브로커의 디스크가 망가지면 XP는 나갔는데 근거가 된 이벤트는 어디에도 남지 않게 됩니다. Kafka는 이걸 막으려고 읽기까지 멈춘 것입니다.</p>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/Kafka_3%EB%8C%80_%EC%9E%A5%EC%95%A0">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/Kafka_3%EB%8C%80_%EC%9E%A5%EC%95%A0_20261012-155048.txt">결과</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/captures/11_Kafka2%EB%8C%80%EC%9E%A5%EC%95%A0_%EC%B2%98%EB%A6%AC%EB%9F%89.png">처리량 그래프(멈춤 구간)</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>데이터는 잃지 않았고, 그 대가로 브로커가 돌아올 때까지 처리가 멈췄습니다. 가용성을 내주고 정합성을 지킨 셈입니다.</p>
+  <p>다만 이 유실 0은 Kafka 혼자 지킨 게 아닙니다. 실험 도구는 acks=1로 보내서 20건이 남은 한 대에만 있었고, 그 한 대마저 망가졌다면 진짜로 사라졌을 것입니다. 실제 Health는 acks=all로 보냅니다.</p>
+  <p>따라서 운영에서 같은 장애가 나면 20건은 브로커에 들어가지 않고 쓰기 실패로 돌아와, 보내는 쪽이 실패를 알 수 있습니다. Kafka 안에 한 대에만 있는 데이터가 생기지 않는 것입니다. 실패한 메시지를 다시 보내는 건 Health 쪽 몫입니다. 유실 0은 브로커 설정과 보내는 쪽의 acks 설정이 함께 만든 결과입니다.</p>
+</div>
+
+<h3>2-2. 전송 도중 서비스가 다운되면</h3>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="2-2 설계상 보장 도식" style="height:440px"><div class="stage" data-h="440">
+<div style="position: relative; width: 1040px; height: 440px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 224px; top: 236px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_guarantee-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s22_guarantee-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 220px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_guarantee-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s22_guarantee-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 497px; top: 252px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_guarantee-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 95 4 L 4 4" marker-end="url(#ah-s22_guarantee-3)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 752px; top: 236px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_guarantee-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s22_guarantee-4)"></path></svg>
+<div style="position: absolute; left: 64px; top: 192px; width: 160px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>이벤트 처리<br>트랜잭션</span></div>
+<div style="position: absolute; left: 320px; top: 192px; width: 176px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>DB<br>XP + Outbox 행</span></div>
+<div style="position: absolute; left: 592px; top: 192px; width: 160px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>발행기<br>따로 돎</span></div>
+<div style="position: absolute; left: 848px; top: 192px; width: 128px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Kafka</div>
+<div style="position: absolute; left: 236px; top: 212px; width: 72px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">같이 저장</div>
+<div style="position: absolute; left: 524px; top: 196px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">읽기</div>
+<div style="position: absolute; left: 500px; top: 268px; width: 88px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">② 완료 표시</div>
+<div style="position: absolute; left: 772px; top: 212px; width: 56px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">① 전송</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: DB에 저장된 메시지는 언젠가 발행된다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">비즈니스 데이터와 보낼 메시지를 한 트랜잭션으로 저장하고, 발행기가 따로 Kafka로 보낸 뒤 완료로 표시한다</div>
+</div>
+</div></figure>
+<p>Outbox 패턴은 보낼 메시지를 비즈니스 데이터와 같은 트랜잭션으로 DB에 저장하고, 별도의 발행기가 Kafka로 보낸 뒤 <strong>발행 완료</strong>로 표시하는 방식입니다. DB에 저장된 이상 메시지는 사라지지 않고, 언젠가는 발행됩니다.</p>
+
+<span class="label">실제 장애</span>
+<figure class="diagram" role="img" aria-label="2-2 실제 장애 도식" style="height:660px"><div class="stage" data-h="660">
+<div style="position: relative; width: 1040px; height: 660px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="127" height="8" viewBox="0 0 127 8" preserveAspectRatio="none" style="position: absolute; left: 224px; top: 196px; width: 127px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 123 4" marker-end="url(#ah-s22_actual-1)"></path></svg>
+<svg width="127" height="8" viewBox="0 0 127 8" preserveAspectRatio="none" style="position: absolute; left: 225px; top: 228px; width: 127px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><defs><marker id="ah-s22_actual-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#999999" stroke="none" style="stroke: none; fill: #999999; fill: context-stroke"/></marker></defs><path d="M 127 4 L 4 4" marker-end="url(#ah-s22_actual-2)"></path></svg>
+<svg width="223" height="8" viewBox="0 0 223 8" preserveAspectRatio="none" style="position: absolute; left: 560px; top: 212px; width: 223px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_actual-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 219 4" marker-end="url(#ah-s22_actual-3)"></path></svg>
+<svg width="8" height="56" viewBox="0 0 8 56" preserveAspectRatio="none" style="position: absolute; left: 452px; top: 264px; width: 8px; height: 56px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 56"></path></svg>
+<svg width="8" height="63" viewBox="0 0 8 63" preserveAspectRatio="none" style="position: absolute; left: 452px; top: 384px; width: 8px; height: 63px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_actual-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 59" marker-end="url(#ah-s22_actual-4)"></path></svg>
+<svg width="223" height="8" viewBox="0 0 223 8" preserveAspectRatio="none" style="position: absolute; left: 560px; top: 480px; width: 223px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s22_actual-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 219 4" marker-end="url(#ah-s22_actual-5)"></path></svg>
+<div style="position: absolute; left: 64px; top: 168px; width: 160px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Outbox<br>미발행 50건</span></div>
+<div style="position: absolute; left: 352px; top: 168px; width: 208px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>발행기<br>묶음 = 한 트랜잭션</span></div>
+<div style="position: absolute; left: 784px; top: 168px; width: 192px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Kafka</div>
+<div style="position: absolute; left: 352px; top: 320px; width: 208px; height: 64px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>JVM 강제 종료<br>10번째 응답 직후</span></div>
+<div style="position: absolute; left: 352px; top: 448px; width: 208px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>재기동<br>50건 다시 전송</span></div>
+<div style="position: absolute; left: 784px; top: 436px; width: 192px; height: 96px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>레코드 60개<br>eventId 50개 (유실 0)<br>두 번 나감 10개</span></div>
+<div style="position: absolute; left: 64px; top: 288px; width: 160px; text-align: center; font-size: 13px; line-height: 18px; color: #555555">다운 직후에도<br>50건 모두 미발행</div>
+<div style="position: absolute; left: 268px; top: 172px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">읽기</div>
+<div style="position: absolute; left: 228px; top: 244px; width: 120px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">② 완료 표시 못 함</div>
+<div style="position: absolute; left: 592px; top: 188px; width: 160px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">① 10건 전송 (응답 받음)</div>
+<div style="position: absolute; left: 468px; top: 408px; width: 56px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">다시 켬</div>
+<div style="position: absolute; left: 636px; top: 456px; width: 72px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">50건 전송</div>
+<div style="position: absolute; left: 64px; top: 568px; width: 912px; font-size: 14px; line-height: 22px; color: #444444">발행은 <b>최소 한 번(at-least-once)</b>. 중복 폭은 묶음 안에서 다운되기 전까지 보낸 건수(최대 100)이고, 같은 eventId라 받는 쪽이 걸러 낼 수 있다.</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제 장애: 전송과 발행 완료 커밋 사이에 서비스가 다운되면 중복 발행된다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">발행기는 최대 100건을 한 트랜잭션으로 보내고, 완료 표시는 묶음이 끝날 때 한꺼번에 커밋한다</div>
+</div>
+</div></figure>
+<p>그런데 Kafka로 보내는 것과 DB에 완료를 표시하는 것은 서로 다른 시스템에 쓰는 두 동작이라 하나로 묶을 수 없습니다. Outbox가 서비스 쪽에서 없앤 이중 쓰기 문제가 발행기 쪽에 그대로 남아 있는 것입니다. 전송과 발행 완료 커밋 사이에 서비스가 다운되면 같은 메시지가 다시 나갑니다.</p>
+<p>이 틈이 얼마나 넓은지는 코드를 보고 예측했습니다. 발행기는 미발행 메시지를 최대 100건씩 가져와 한 트랜잭션에서 보내고, 완료 표시는 그 묶음이 끝날 때 한꺼번에 커밋합니다. 그렇다면 중복은 1건이 아니라 <strong>다운되기 전까지 보낸 건수</strong>만큼 생길 것입니다.</p>
+<p>실험으로 확인했습니다. 발행을 막아 둔 채 미발행 메시지 50건을 쌓고, 막은 걸 푼 뒤 10번째 메시지의 전송 응답을 받자마자 JVM을 강제 종료했습니다.</p>
+<table>
+  <thead><tr><th>시점</th><th>결과</th></tr></thead>
+  <tbody>
+    <tr><td>다운 직후</td><td>50건 모두 여전히 미발행</td></tr>
+    <tr><td>재기동 후</td><td>50건 모두 발행 완료</td></tr>
+    <tr><td>Kafka 토픽</td><td>레코드 60개, 서로 다른 eventId 50개 → 유실 0</td></tr>
+    <tr><td>중복</td><td>두 번 나간 eventId 10개, 두 레코드의 내용은 완전히 같음</td></tr>
+  </tbody>
+</table>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/Outbox_%EA%B0%95%EC%A0%9C%EC%A2%85%EB%A3%8C">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/Outbox_%EA%B0%95%EC%A0%9C%EC%A2%85%EB%A3%8C_20261012-152804.txt">결과</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/Outbox_%EA%B0%95%EC%A0%9C%EC%A2%85%EB%A3%8C_kafka_dump.txt">Kafka 레코드 덤프</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>발행하는 쪽은 <strong>exactly-once</strong>가 아니라 <strong>at-least-once</strong>였습니다. 중복의 폭은 한 묶음 안에서 다운되기 전까지 보낸 건수, 최대 100건입니다. 중복된 레코드는 eventId가 같으므로, 받는 쪽이 eventId로 걸러 내면 결과는 한 번 처리한 것과 같아집니다. Game이 받는 쪽일 때도 같은 원칙을 씁니다. 이미 처리한 이벤트 10건을 다시 흘려보냈을 때 추가 보상은 0건이었습니다.</p>
+</div>
+
+<h3>2-3. 유실 0은 공짜로 만들어지는 게 아니다</h3>
+<p>두 실험 모두 유실은 0이었습니다. 하지만 대가가 있었습니다.</p>
+<ul>
+  <li>브로커 과반이 죽으면 브로커가 돌아올 때까지 아무것도 처리하지 않습니다.</li>
+  <li>전송 도중 서비스가 다운되면 같은 메시지가 최대 한 묶음만큼 두 번 나갑니다.</li>
+</ul>
+<p>그리고 한 가지가 더 마음에 걸렸습니다. 파이프라인 전체가 멈춰 있는 동안 울린 알림이 하나도 없었습니다. 서비스는 살아 있었고 에러도 없었으니, Game 입장에서는 이벤트가 안 들어오는 조용한 새벽 구간과 구분할 수 없었던 것입니다.</p>
+<p>그렇다면 다른 장애에서는 알림이 제대로 울릴까요? 하나씩 직접 멈춰 보기로 했습니다.</p>
+</section>
+
+<section>
+<h2>3. 멈추면 정말 알 수 있을까?</h2>
+
+<h3>3-1. 알림은 울리는가 (지표)</h3>
+
+<h4>① 20분 멈췄는데 lag은 0</h4>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="3-1 ① 설계상 보장 도식" style="height:520px"><div class="stage" data-h="520">
+<div style="position: relative; width: 1040px; height: 520px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 196px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_guarantee-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31a_guarantee-1)"></path></svg>
+<svg width="8" height="79" viewBox="0 0 8 79" preserveAspectRatio="none" style="position: absolute; left: 428px; top: 240px; width: 8px; height: 79px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_guarantee-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 75" marker-end="url(#ah-s31a_guarantee-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 528px; top: 356px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_guarantee-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31a_guarantee-3)"></path></svg>
+<svg width="63" height="8" viewBox="0 0 63 8" preserveAspectRatio="none" style="position: absolute; left: 816px; top: 356px; width: 63px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_guarantee-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 59 4" marker-end="url(#ah-s31a_guarantee-4)"></path></svg>
+<div style="position: absolute; left: 64px; top: 160px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Kafka 파티션</div>
+<div style="position: absolute; left: 336px; top: 160px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 컨슈머<br>실패하면 재시도</span></div>
+<div style="position: absolute; left: 336px; top: 320px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>지표<br>records-lag-max</span></div>
+<div style="position: absolute; left: 624px; top: 320px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>알림 규칙<br>10분 내내 0보다 큼</span></div>
+<div style="position: absolute; left: 880px; top: 320px; width: 96px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Slack</div>
+<div style="position: absolute; left: 264px; top: 172px; width: 48px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">이벤트</div>
+<div style="position: absolute; left: 444px; top: 272px; width: 48px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">내보냄</div>
+<div style="position: absolute; left: 64px; top: 448px; width: 912px; font-size: 14px; line-height: 22px; color: #444444">목적: 정각 스파이크처럼 이벤트가 한꺼번에 들어올 때를 제외하고, 이벤트가 한산한 새벽에 쌓인 lag가 계속 남아 있을 경우에 Slack으로 알림을 보낸다.</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: 밀린 양이 10분 넘게 안 줄면 알림</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">한 이벤트가 실패를 거듭하면 해당 파티션의 뒤 이벤트들이 대기한다. 그 밀린 양(lag)을 지표로 본다</div>
+</div>
+</div></figure>
+<p>Game은 실패한 이벤트를 바로 버리지 않습니다. DB 연결이 끊긴 것처럼 기다리면 풀리는 장애는 성공할 때까지 재시도합니다. 한 이벤트가 실패를 거듭하면 해당 파티션의 뒤 이벤트들이 대기합니다.</p>
+<p>그래서 <strong>밀린 양(consumer lag)이 10분 내내 0으로 내려오지 않으면</strong> 울리는 알림을 넣었습니다. 정각 스파이크처럼 이벤트가 한꺼번에 들어올 때는 제외하고, 이벤트가 한산한 새벽에 쌓인 lag가 계속 남아 있으면 Slack으로 알림을 보내기 위해서였습니다. 지표는 Kafka 클라이언트가 기본으로 내는 records-lag-max를 썼습니다.</p>
+
+<span class="label">실제 장애</span>
+<figure class="diagram" role="img" aria-label="3-1 ① 실제 장애 도식" style="height:552px"><div class="stage" data-h="552">
+<div style="position: relative; width: 1040px; height: 552px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="8" height="55" viewBox="0 0 8 55" preserveAspectRatio="none" style="position: absolute; left: 156px; top: 200px; width: 8px; height: 55px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 51" marker-end="url(#ah-s31a_actual-1)"></path></svg>
+<svg width="8" height="55" viewBox="0 0 8 55" preserveAspectRatio="none" style="position: absolute; left: 812px; top: 200px; width: 8px; height: 55px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31a_actual-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 51" marker-end="url(#ah-s31a_actual-2)"></path></svg>
+<div style="position: absolute; left: 80px; top: 136px; width: 160px; height: 64px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 15px; line-height: 22px"><span>처리 끝낸 위치<br>(커밋)</span></div>
+<div style="position: absolute; left: 736px; top: 136px; width: 160px; height: 64px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 15px; line-height: 22px"><span>가져온 위치<br>(fetch)</span></div>
+<div style="position: absolute; left: 160px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 2px solid #444444; border-radius: 6px; font-size: 14px; line-height: 20px"><span><b>1</b><br>실패 중</span></div>
+<div style="position: absolute; left: 272px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 6px; font-size: 14px; line-height: 20px"><span>2<br>대기</span></div>
+<div style="position: absolute; left: 384px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 6px; font-size: 14px; line-height: 20px"><span>3<br>대기</span></div>
+<div style="position: absolute; left: 496px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 6px; font-size: 14px; line-height: 20px"><span>4<br>대기</span></div>
+<div style="position: absolute; left: 608px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 6px; font-size: 14px; line-height: 20px"><span>5<br>대기</span></div>
+<div style="position: absolute; left: 720px; top: 256px; width: 96px; height: 64px; box-sizing: border-box; padding: 6px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 6px; font-size: 14px; line-height: 20px"><span>6<br>대기</span></div>
+<div style="position: absolute; left: 64px; top: 384px; width: 432px; height: 104px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 15px; line-height: 24px"><span><b>예전 지표 · 가져온 위치 기준</b><br>끝 − 가져온 위치 = 0<br>20분 내내 0 → 알림 안 울림</span></div>
+<div style="position: absolute; left: 544px; top: 384px; width: 432px; height: 104px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 15px; line-height: 24px"><span><b>새 지표 · 커밋 기준 (30초마다 직접 잼)</b><br>끝 − 처리 끝낸 위치 = 6<br>20분 내내 6 → 603초 만에 Slack</span></div>
+<div style="position: absolute; left: 64px; top: 280px; width: 80px; font-size: 13px; line-height: 16px; color: #555555">파티션</div>
+<div style="position: absolute; left: 828px; top: 280px; width: 24px; font-size: 13px; line-height: 16px; color: #555555">끝</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제 장애: 20분 멈췄는데 lag은 0</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">실패한 레코드로 되감을 때마다 뒤 레코드까지 다시 가져와서, <b>가져온 위치</b>는 늘 끝에 닿아 있었다</div>
+</div>
+</div></figure>
+<p>같은 유저의 이벤트 6건이 한 파티션에서 계속 실패하도록 만들어, 파티션을 20분 동안 멈췄습니다. 첫 이벤트는 멈춤을 풀어 준 순간에야 처리됐습니다. 그런데 지표는 20분 내내 0이었고, 알림은 울리지 않았습니다.</p>
+<p>records-lag-max는 <strong>처리를 끝낸 위치</strong>가 아니라 <strong>가져온 위치</strong> 기준이었습니다. 실패한 레코드로 되감을 때마다 컨슈머는 그 뒤 레코드까지 한 번에 다시 가져오고, 가져온 위치는 파티션 끝에 닿아 lag이 0으로 계산됩니다. 밀린 양이 한 번에 가져오는 양(파티션당 최대 1MB, 작은 이벤트면 수천 건)보다 적으면 멈춘 파티션이 보이지 않습니다. 이 알림을 넣은 이유였던 <strong>이벤트가 한산할 때</strong>가 정확히 그 조건이었습니다.</p>
+<p>서비스가 30초마다 컨슈머 그룹의 커밋 오프셋과 파티션 끝 오프셋을 직접 읽어, 그 차이를 지표로 내게 바꿨습니다. 실패한 레코드는 커밋되지 않으므로, 멈춘 동안 이 값은 0보다 크게 남습니다. 같은 지표를 내 주는 별도 컨테이너(kafka-exporter)도 있었지만, 운영 서버 메모리를 생각해 서비스 안에서 재는 쪽을 택했습니다.</p>
+<p>같은 멈춤을 다시 만들자 새 지표는 20분 내내 6, 기존 지표는 0이었습니다. 알림은 603초 만에 Slack에 도착했고, 멈춤을 풀자 해소됐습니다. 평상시 트래픽을 30분 흘렸을 때 오탐은 없었고, 처리량이 유입을 못 따라가는 상황에서도 같은 알림이 울렸습니다.</p>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/%EC%95%8C%EB%A6%BC_DLT_lag_Outbox">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/%EC%95%8C%EB%A6%BC_DLT_lag_Outbox_20261012-125102.txt">결과(두 지표 비교)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/%EC%95%8C%EB%A6%BC_DLT_lag_Outbox_20261012-132128.txt">결과(알림 603초)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/captures/02_lag_%EB%A9%88%EC%B6%98%ED%8C%8C%ED%8B%B0%EC%85%98_%EC%BB%A4%EB%B0%8B%EA%B8%B0%EC%A4%80.png">lag 그래프</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/lag%EC%95%8C%EB%A6%BC_%EC%98%A4%ED%83%90_%EB%8B%A4%EC%9A%B4%EA%B0%90%EC%A7%80_20261012-165021.txt">평상시 오탐 확인</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>지표 이름이 lag이라고 해서 내가 원하는 lag은 아니었습니다. 알림은 넣는 것으로 끝나지 않고, 그 알림이 잡아야 할 상황을 실제로 만들어 봐야 합니다.</p>
+</div>
+
+<h4>② 서비스가 다운되면 지표도 사라진다</h4>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="3-1 ② 설계상 보장 도식" style="height:496px"><div class="stage" data-h="496">
+<div style="position: relative; width: 1040px; height: 496px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 224px; top: 220px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_guarantee-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31b_guarantee-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 220px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_guarantee-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31b_guarantee-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 784px; top: 220px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_guarantee-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31b_guarantee-3)"></path></svg>
+<svg width="8" height="88" viewBox="0 0 8 88" preserveAspectRatio="none" style="position: absolute; left: 404px; top: 264px; width: 8px; height: 88px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 88"></path></svg>
+<div style="position: absolute; left: 64px; top: 184px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 서비스<br>지표를 직접 냄</span></div>
+<div style="position: absolute; left: 320px; top: 184px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Prometheus<br>15초마다 수집</span></div>
+<div style="position: absolute; left: 592px; top: 184px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 알림 8개<br>서비스 지표 기반</span></div>
+<div style="position: absolute; left: 880px; top: 184px; width: 96px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Slack</div>
+<div style="position: absolute; left: 320px; top: 352px; width: 464px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>설계 메모: 서비스가 통째로 다운되면<br>Prometheus 기본 <b>up == 0</b> 알림이 잡는다</span></div>
+<div style="position: absolute; left: 252px; top: 196px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">지표</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: 서비스가 다운되면 기본 알림이 잡는다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">서비스가 내는 지표로 이상을 잡고, 서비스 자체가 다운되는 건 Prometheus 기본 알림이 잡을 거라고 예상했다</div>
+</div>
+</div></figure>
+<p>서비스가 내는 지표로 이상을 잡고, 서비스 자체가 다운되는 건 Prometheus 기본 <code>up == 0</code> 알림이 잡을 거라고 예상했습니다.</p>
+
+<span class="label">실제 장애</span>
+<figure class="diagram" role="img" aria-label="3-1 ② 실제 장애 도식" style="height:536px"><div class="stage" data-h="536">
+<div style="position: relative; width: 1040px; height: 536px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="96" height="8" viewBox="0 0 96 8" preserveAspectRatio="none" style="position: absolute; left: 224px; top: 212px; width: 96px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 96 4"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31b_actual-1)"></path></svg>
+<svg width="96" height="8" viewBox="0 0 96 8" preserveAspectRatio="none" style="position: absolute; left: 784px; top: 212px; width: 96px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 96 4"></path></svg>
+<svg width="8" height="79" viewBox="0 0 8 79" preserveAspectRatio="none" style="position: absolute; left: 404px; top: 256px; width: 8px; height: 79px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_actual-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 75" marker-end="url(#ah-s31b_actual-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 784px; top: 372px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s31b_actual-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s31b_actual-3)"></path></svg>
+<div style="position: absolute; left: 64px; top: 176px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>Game 서비스<br>15분 꺼짐</span></div>
+<div style="position: absolute; left: 320px; top: 176px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Prometheus<br>up = 0 기록</span></div>
+<div style="position: absolute; left: 592px; top: 176px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 알림 8개<br>데이터 없음 = 정상</span></div>
+<div style="position: absolute; left: 880px; top: 176px; width: 96px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>Slack<br>0건</span></div>
+<div style="position: absolute; left: 320px; top: 336px; width: 464px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span><b>새 규칙</b><br>살아 있는 Game 인스턴스 0개가 2분 지속</span></div>
+<div style="position: absolute; left: 880px; top: 336px; width: 96px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Slack<br>176초</span></div>
+<div style="position: absolute; left: 240px; top: 188px; width: 64px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">지표 없음</div>
+<div style="position: absolute; left: 804px; top: 188px; width: 56px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">안 울림</div>
+<div style="position: absolute; left: 420px; top: 288px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">up 값</div>
+<div style="position: absolute; left: 64px; top: 456px; width: 912px; font-size: 14px; line-height: 22px; color: #444444"><b>하나라도 0</b>이 아니라 <b>살아 있는 게 0</b>으로 건 이유: 블루/그린 배포에서 쉬는 쪽은 늘 up = 0이다.</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제 장애: 서비스가 다운되자 지표도, 알림도 오지 않았다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">그런 기본 규칙은 없었다. 서비스를 15분 끄자 456건이 밀렸는데, 규칙은 <b>데이터 없음 = 정상</b>으로 판정했다</div>
+</div>
+</div></figure>
+<p>그런 규칙은 없었습니다. 서비스를 15분 동안 껐더니 이벤트 456건이 밀렸는데, Game 알림 8개는 모두 조용했고 Slack에는 아무것도 오지 않았습니다.</p>
+<p>Prometheus는 <code>up</code>을 0으로 정확히 기록하고 있었지만, 그 값을 보는 규칙이 없었습니다. 알림 8개는 모두 Game이 직접 내는 숫자를 보고 있었고, 서비스가 다운되면 그 숫자가 통째로 사라집니다. 규칙은 <strong>데이터 없음 = 정상</strong>으로 설정돼 있었습니다. 블루/그린 배포에서 쉬고 있는 쪽은 늘 데이터가 없기 때문에 일부러 그렇게 둔 설정이었습니다.</p>
+<p><code>up</code>을 보는 규칙을 새로 만들었습니다. <strong>살아 있는 Game 인스턴스가 하나도 없는 상태가 2분 지속</strong>되면 울립니다. <strong>하나라도 0</strong>으로 걸면 쉬는 쪽 때문에 알림이 늘 울리고, 2분은 배포나 재시작 때의 짧은 공백을 거르기 위한 값입니다. 기존 규칙을 <strong>데이터 없음 = 알림</strong>으로 바꾸는 방법도 있었지만, 쉬는 쪽 때문에 같은 문제가 생겨 버렸습니다.</p>
+<p>다시 서비스를 끄자 176초 만에 Slack이 왔고, 그 순간에도 기존 알림 8개는 여전히 조용했습니다. 다운을 잡은 건 이 규칙 하나였습니다.</p>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/lag%EC%95%8C%EB%A6%BC_%EC%98%A4%ED%83%90_%EB%8B%A4%EC%9A%B4%EA%B0%90%EC%A7%80">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/lag%EC%95%8C%EB%A6%BC_%EC%98%A4%ED%83%90_%EB%8B%A4%EC%9A%B4%EA%B0%90%EC%A7%80_20261012-165021.txt">결과(다운 중 알림 0)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/lag%EC%95%8C%EB%A6%BC_%EC%98%A4%ED%83%90_%EB%8B%A4%EC%9A%B4%EA%B0%90%EC%A7%80_20261012-190842.txt">결과(새 규칙 176초)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/captures/13_%EC%84%9C%EB%B9%84%EC%8A%A4%EB%8B%A4%EC%9A%B4_%EC%95%8C%EB%A6%BC_Slack.png">Slack 알림 화면</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>감시 대상이 스스로 숫자를 보내야 감시가 되는 구조라면, 대상이 다운되는 순간 감시도 함께 사라집니다. 바깥에서 두드려 보는 신호가 적어도 하나는 있어야 합니다.</p>
+</div>
+
+<h3>3-2. 왜 멈췄는지 아는가 (로그)</h3>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="3-2 설계상 보장 도식" style="height:496px"><div class="stage" data-h="496">
+<div style="position: relative; width: 1040px; height: 496px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 208px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_guarantee-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_guarantee-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 752px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_guarantee-3)"></path></svg>
+<svg width="8" height="95" viewBox="0 0 8 95" preserveAspectRatio="none" style="position: absolute; left: 396px; top: 256px; width: 8px; height: 95px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 91" marker-end="url(#ah-s32_guarantee-4)"></path></svg>
+<svg width="8" height="95" viewBox="0 0 8 95" preserveAspectRatio="none" style="position: absolute; left: 908px; top: 256px; width: 8px; height: 95px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 91" marker-end="url(#ah-s32_guarantee-5)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 497px; top: 388px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_guarantee-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 95 4 L 4 4" marker-end="url(#ah-s32_guarantee-6)"></path></svg>
+<div style="position: absolute; left: 64px; top: 176px; width: 144px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>실패하는<br>이벤트</span></div>
+<div style="position: absolute; left: 304px; top: 176px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 컨슈머<br>버그면 3번 재시도</span></div>
+<div style="position: absolute; left: 592px; top: 176px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>DLT<br>실패 이벤트 보관</span></div>
+<div style="position: absolute; left: 848px; top: 176px; width: 128px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Slack<br>DLT 알림</span></div>
+<div style="position: absolute; left: 304px; top: 352px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Loki<br>앱 로그 모음</span></div>
+<div style="position: absolute; left: 592px; top: 352px; width: 384px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>담당자<br>알림을 받고 Loki에서 검색</span></div>
+<div style="position: absolute; left: 524px; top: 188px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">옮김</div>
+<div style="position: absolute; left: 412px; top: 296px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">로그</div>
+<div style="position: absolute; left: 924px; top: 296px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">알림</div>
+<div style="position: absolute; left: 524px; top: 364px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">검색</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: 실패는 DLT로, 원인은 로그에서</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">재시도해도 안 되는 이벤트는 DLT로 옮기고 알림을 보낸다. 앱 로그는 Loki에 모이니 원인은 거기서 찾는다.</div>
+</div>
+</div></figure>
+<p>재시도해도 안 되는 이벤트는 DLT(Dead Letter Topic)로 옮깁니다. 형식이 깨진 이벤트는 바로, 코드 버그로 실패하는 이벤트는 세 번 재시도한 뒤 옮기고, DLT에 쌓이면 알림이 울립니다. 서비스 로그는 Loki에 모이니 원인은 거기서 찾는다고 생각했습니다.</p>
+
+<span class="label">실제 장애</span>
+<figure class="diagram" role="img" aria-label="3-2 실제 장애 도식" style="height:616px"><div class="stage" data-h="616">
+<div style="position: relative; width: 1040px; height: 616px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 208px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_actual-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_actual-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 752px; top: 212px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s32_actual-3)"></path></svg>
+<svg width="8" height="96" viewBox="0 0 8 96" preserveAspectRatio="none" style="position: absolute; left: 396px; top: 256px; width: 8px; height: 96px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 4 0 L 4 96"></path></svg>
+<svg width="8" height="95" viewBox="0 0 8 95" preserveAspectRatio="none" style="position: absolute; left: 908px; top: 256px; width: 8px; height: 95px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 91" marker-end="url(#ah-s32_actual-4)"></path></svg>
+<svg width="8" height="95" viewBox="0 0 8 95" preserveAspectRatio="none" style="position: absolute; left: 668px; top: 257px; width: 8px; height: 95px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 4 95 L 4 4" marker-end="url(#ah-s32_actual-5)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 497px; top: 388px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s32_actual-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 95 4 L 4 4" marker-end="url(#ah-s32_actual-6)"></path></svg>
+<div style="position: absolute; left: 64px; top: 176px; width: 144px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>깨진 JSON<br>+ 버그 이벤트</span></div>
+<div style="position: absolute; left: 304px; top: 176px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game 컨슈머<br>로그 안 남김</span></div>
+<div style="position: absolute; left: 592px; top: 176px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>DLT 2건<br>원인은 헤더에만</span></div>
+<div style="position: absolute; left: 848px; top: 176px; width: 128px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Slack<br>45초 만에 도착</span></div>
+<div style="position: absolute; left: 304px; top: 352px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>Loki<br>eventId 검색 0줄</span></div>
+<div style="position: absolute; left: 592px; top: 352px; width: 384px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>담당자<br>Kafka에서 DLT를 직접 열어야 원인 확인</span></div>
+<div style="position: absolute; left: 64px; top: 472px; width: 912px; height: 88px; box-sizing: border-box; padding: 12px 16px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 15px; line-height: 24px"><span><b>고친 뒤</b> · DLT로 옮길 때 ERROR 한 줄(위치 · eventId · 근본 원인), 재시도마다 WARN 한 줄<br>eventId 하나로 검색하면 깨진 JSON은 2줄, 버그 이벤트는 5줄</span></div>
+<div style="position: absolute; left: 524px; top: 188px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">옮김</div>
+<div style="position: absolute; left: 412px; top: 296px; width: 88px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">남긴 줄 없음</div>
+<div style="position: absolute; left: 924px; top: 296px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">알림</div>
+<div style="position: absolute; left: 684px; top: 296px; width: 64px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">직접 열기</div>
+<div style="position: absolute; left: 508px; top: 364px; width: 72px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">검색 → 0줄</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제 장애: 알림은 왔는데 로그는 0줄</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">깨진 JSON 1건과 버그 이벤트 1건을 넣었다. DLT에 2건이 쌓였고 Slack은 45초 만에 왔다</div>
+</div>
+</div></figure>
+<p>깨진 JSON 1건과 코드 버그로 실패하는 이벤트 1건을 넣었습니다. DLT에 2건이 쌓였고, 45초 만에 Slack 알림이 왔습니다.</p>
+<p>그런데 Loki에서 두 이벤트를 찾으니 eventId, 유저 id, 예외 이름 모두 0줄이었습니다. 서비스의 원본 로그 파일에도 없었습니다. 수집 문제가 아니라 서비스가 아예 남기지 않은 것이었습니다. 원인은 DLT 레코드의 헤더에만 있었고, 알림을 받은 사람은 Kafka를 직접 열어 봐야 원인을 알 수 있었습니다.</p>
+<p>DLT로 보낼 때 알림용 카운터를 세려고 처리기를 직접 만들면서, 스프링 기본 처리기가 남기던 로그가 함께 사라졌던 것입니다. 테스트는 헤더와 오프셋, 카운터만 확인했고 로그는 보지 않았습니다.</p>
+<p>두 곳에 한 줄씩 남기게 고쳤습니다.</p>
+<ul>
+  <li>DLT로 옮긴 직후: 원래 위치, 유저 id, eventId, 근본 원인을 ERROR 한 줄로</li>
+  <li>재시도할 때마다: 몇 번째 시도인지, 어떤 종류의 실패인지를 WARN 한 줄로</li>
+</ul>
+<p>eventId는 깨진 JSON에서도 건질 수 있게 파싱 대신 정규식으로 꺼냈습니다. 스택 트레이스는 넣지 않았습니다. 여러 줄이 되면 Loki의 줄 단위 검색이 깨지고, 이미 DLT 헤더에 들어 있기 때문입니다.</p>
+<p>같은 실험을 다시 돌리자 eventId 하나로 그 이벤트의 이력이 모두 나왔습니다. 깨진 JSON은 <strong>형식 위반</strong> WARN 한 줄과 DLT ERROR 한 줄(근본 원인 JsonParseException, 열 위치까지), 버그 이벤트는 1 · 2 · 4초 간격의 재시도 WARN 네 줄과 DLT ERROR 한 줄이 나왔습니다.</p>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/%EC%95%8C%EB%A6%BC%EB%92%A4_%EC%9B%90%EC%9D%B8%EC%B6%94%EC%A0%81">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/%EC%95%8C%EB%A6%BC%EB%92%A4_%EC%9B%90%EC%9D%B8%EC%B6%94%EC%A0%81_20261012-144348.txt">결과(고치기 전, 0줄)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/%EC%95%8C%EB%A6%BC%EB%92%A4_%EC%9B%90%EC%9D%B8%EC%B6%94%EC%A0%81_20261012-145404.txt">결과(고친 뒤)</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/captures/10_DLT_%EC%9B%90%EC%9D%B8%EB%A1%9C%EA%B7%B8.png">Loki 로그 화면</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>알림은 <strong>무슨 일이 생겼다</strong>까지만 알려 줍니다. <strong>어느 이벤트가 왜</strong>는 로그의 몫이고, 알림이 울리는 것과 원인을 찾을 수 있는 것은 따로 확인해야 합니다.</p>
+</div>
+
+<h3>3-3. 어디까지 갔는지 아는가 (트레이스)</h3>
+<span class="label">설계상 보장</span>
+<figure class="diagram" role="img" aria-label="3-3 설계상 보장 도식" style="height:384px"><div class="stage" data-h="384">
+<div style="position: relative; width: 1040px; height: 384px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<div style="position: absolute; left: 56px; top: 160px; width: 928px; height: 160px; box-sizing: border-box; border: 1px dashed #b0b0b0; border-radius: 12px"></div>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 224px; top: 244px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_guarantee-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_guarantee-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 480px; top: 244px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_guarantee-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_guarantee-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 736px; top: 244px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_guarantee-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_guarantee-3)"></path></svg>
+<div style="position: absolute; left: 80px; top: 208px; width: 144px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Health</div>
+<div style="position: absolute; left: 320px; top: 208px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game<br>이벤트 수신</span></div>
+<div style="position: absolute; left: 576px; top: 208px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Game<br>이벤트 발행</span></div>
+<div style="position: absolute; left: 832px; top: 208px; width: 128px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">다음 서비스</div>
+<div style="position: absolute; left: 72px; top: 168px; width: 280px; font-size: 13px; line-height: 16px; color: #555555">기대: 처음부터 끝까지 trace 하나</div>
+<div style="position: absolute; left: 252px; top: 220px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">헤더</div>
+<div style="position: absolute; left: 764px; top: 220px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">헤더</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">설계상 보장: 헤더로 이어 받으니 trace는 하나</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">Kafka 메시지는 traceparent 헤더로 trace를 이어 받는다. 서비스를 건너도 한 trace로 보일 거라고 생각했다</div>
+</div>
+</div></figure>
+<p>서비스에는 Zipkin 분산 추적이 붙어 있고, Kafka 메시지는 헤더(traceparent)로 trace를 이어 받습니다. 그러니 Health가 보낸 이벤트가 Game을 거쳐 다음 서비스로 나가는 흐름이 한 trace로 보일 거라고 생각했습니다.</p>
+
+<span class="label">실제로는</span>
+<figure class="diagram" role="img" aria-label="3-3 실제 도식" style="height:560px"><div class="stage" data-h="560">
+<div style="position: relative; width: 1040px; height: 560px; background: #ffffff; color: #222222; font-family: 'Noto Sans KR', sans-serif">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 204px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_actual-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_actual-1)"></path></svg>
+<svg width="96" height="8" viewBox="0 0 96 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 204px; width: 96px; height: 8px; overflow: visible; fill: none; stroke: #999999; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 6 6"><path d="M 0 4 L 96 4"></path></svg>
+<svg width="79" height="8" viewBox="0 0 79 8" preserveAspectRatio="none" style="position: absolute; left: 784px; top: 204px; width: 79px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_actual-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 75 4" marker-end="url(#ah-s33_actual-2)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 364px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_actual-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_actual-3)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 496px; top: 364px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_actual-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#ah-s33_actual-4)"></path></svg>
+<svg width="79" height="8" viewBox="0 0 79 8" preserveAspectRatio="none" style="position: absolute; left: 784px; top: 364px; width: 79px; height: 8px; overflow: visible; fill: none; stroke: #666666; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="ah-s33_actual-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#666666" stroke="none" style="stroke: none; fill: #666666; fill: context-stroke"/></marker></defs><path d="M 0 4 L 75 4" marker-end="url(#ah-s33_actual-5)"></path></svg>
+<div style="position: absolute; left: 64px; top: 168px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>이벤트 수신<br>컨슈머 스레드</span></div>
+<div style="position: absolute; left: 336px; top: 168px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Outbox 행</div>
+<div style="position: absolute; left: 592px; top: 168px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #f4f4f4; border: 1px dashed #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px; color: #444444"><span>발행 · 새 trace<br>스케줄러 스레드</span></div>
+<div style="position: absolute; left: 864px; top: 168px; width: 112px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px">Kafka</div>
+<div style="position: absolute; left: 64px; top: 328px; width: 176px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>이벤트 수신<br>trace 정보 저장</span></div>
+<div style="position: absolute; left: 336px; top: 328px; width: 160px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Outbox 행<br>+ trace 정보</span></div>
+<div style="position: absolute; left: 592px; top: 328px; width: 192px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>발행<br>부모로 되살림</span></div>
+<div style="position: absolute; left: 864px; top: 328px; width: 112px; height: 80px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #ffffff; border: 1px solid #8c8c8c; border-radius: 8px; font-size: 16px; line-height: 24px"><span>Kafka<br>같은 traceId</span></div>
+<div style="position: absolute; left: 64px; top: 136px; width: 240px; font-size: 14px; line-height: 20px; font-weight: 700; color: #444444">고치기 전 (구조상)</div>
+<div style="position: absolute; left: 64px; top: 296px; width: 240px; font-size: 14px; line-height: 20px; font-weight: 700; color: #444444">고친 뒤 (실험으로 확인)</div>
+<div style="position: absolute; left: 268px; top: 180px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">저장</div>
+<div style="position: absolute; left: 508px; top: 180px; width: 72px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">trace 끊김</div>
+<div style="position: absolute; left: 268px; top: 340px; width: 40px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">저장</div>
+<div style="position: absolute; left: 512px; top: 340px; width: 64px; text-align: center; font-size: 13px; line-height: 16px; color: #555555">이어 붙임</div>
+<div style="position: absolute; left: 64px; top: 448px; width: 912px; font-size: 14px; line-height: 22px; color: #444444">실험: traceId를 고정한 헤더로 이벤트를 넣자 수신 → Outbox 발행 → Kafka 전송이 Zipkin에서 한 trace로 이어졌고, 같은 traceId로 Loki 로그 11줄이 나왔다.</div>
+<div style="position: absolute; left: 64px; top: 48px; font-size: 22px; line-height: 32px; font-weight: 700">실제: Outbox에서 trace가 끊긴다</div>
+<div style="position: absolute; left: 64px; top: 88px; width: 912px; font-size: 15px; line-height: 24px; color: #444444">발행은 나중에, 다른 스레드 · 다른 트랜잭션에서 일어나서 원래 trace 정보가 남아 있지 않다</div>
+</div>
+</div></figure>
+<p>Game의 출구는 Outbox입니다. 이벤트를 받은 트랜잭션은 Outbox에 행을 저장하고 끝나고, 실제 발행은 나중에 스케줄러 스레드가 다른 트랜잭션에서 합니다. 발행하는 시점에는 원래 trace 정보가 남아 있지 않아 새 trace로 시작하게 되고, Game의 입구와 출구가 끊깁니다.</p>
+<p>Outbox에 행을 저장할 때 현재 trace 정보를 같이 저장하고, 발행할 때 그 값을 꺼내 부모로 되살리게 고쳤습니다. 샘플링도 부모의 결정을 따르므로, 샘플링 비율을 낮춰도 뽑힌 trace는 끝까지 이어집니다.</p>
+<p>Health 대신 traceId를 고정한 헤더를 붙여 이벤트를 넣었습니다. Zipkin에서 한 trace 안에 <strong>이벤트 수신 → Outbox 발행(다른 스레드, 다른 트랜잭션) → Kafka 전송</strong>이 한 줄로 이어졌고, 밖으로 나가는 메시지에도 같은 traceId가 실렸습니다. 다음 서비스는 이 값을 이어 받으면 됩니다.</p>
+<p class="ref">실험: <a href="https://github.com/pathfinder357/rp-gym/tree/game-experiments-2026-10/experiments/trace_%EC%9D%B4%EC%96%B4%EC%A7%90">실행 도구</a> · <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/trace_%EC%9D%B4%EC%96%B4%EC%A7%90_20261012-151053.txt">결과</a></p>
+
+<span class="label result">결론</span>
+<div class="conclusion">
+  <p>Outbox처럼 처리를 나중으로 미루는 경계는 trace가 끊기는 자리입니다. trace 정보도 데이터와 함께 저장해야 이어집니다.</p>
+</div>
+
+<h3>3-4. 세 신호를 잇기</h3>
+<p>이제 장애가 나면 이 순서로 따라갈 수 있습니다. 알림이 울리면 DLT 로그에서 eventId와 원인을 찾고, 그 로그 줄에 붙은 traceId로 Zipkin에서 이벤트가 어디까지 갔는지 봅니다. 실제로 같은 traceId로 Loki를 검색하자, 이벤트를 받은 스레드와 발행한 스레드의 로그 11줄이 한꺼번에 나왔습니다.</p>
+<p>하지만 2장에서 본 브로커 멈춤은 이 셋 중 어느 것으로도 잡히지 않습니다. 서비스는 살아 있었고, 실패한 이벤트도, 남을 로그도 없었기 때문입니다.</p>
+</section>
+
+<section>
+<h2>4. 에필로그</h2>
+<h4>감시도 유실을 막는 장치다</h4>
+<p>파티션이 20분 멈췄을 때도, 서비스가 15분 동안 다운됐을 때도 이벤트는 Kafka에 그대로 남아 있었습니다. 하지만 그동안 아무도 몰랐습니다. Kafka는 이벤트를 보관 기간만큼만 들고 있기 때문에, 멈춘 걸 모른 채 그 기간이 지나면 그때는 정말로 유실됩니다. 그래서 저는 알림과 로그, 트레이스도 유실을 막는 장치라고 생각합니다.</p>
+<h4>보장과 검증은 다르다</h4>
+<p>Kafka 복제, Outbox, lag 알림, DLT 모두 설계상으로는 맞았습니다. 하지만 직접 꺼 보기 전에는 2대가 죽으면 읽기까지 멈춘다는 것도, 중복이 한 묶음만큼 생긴다는 것도, lag 알림이 멈춘 파티션을 못 본다는 것도 몰랐습니다. 설계상 보장은 <strong>그래야 한다</strong>이고, 검증은 <strong>실제로 그랬다</strong>입니다.</p>
+<h4>아직 남은 허점</h4>
+<ul>
+  <li>브로커 과반이 죽어 파이프라인 전체가 멈춘 동안 울린 알림이 없습니다. 서비스가 내는 지표로는 이 멈춤이 보이지 않아, 브로커 쪽 지표(복제본이 부족한 파티션 수 등)를 따로 봐야 합니다.</li>
+  <li>브로커 2대가 죽었을 때 읽기가 멈춘 원인은 high watermark로 보고 있지만, 아직 그 값을 직접 확인하지는 못했습니다.</li>
+</ul>
+</section>
+
+</article>
+<script>
+// 도식(원본 폭 1040px)을 화면 폭에 맞춰 비율 그대로 줄인다
+(function () {
+  function fit() {
+    document.querySelectorAll('figure.diagram').forEach(function (fig) {
+      var stage = fig.querySelector('.stage');
+      var h = Number(stage.dataset.h);
+      var s = Math.min(1, fig.clientWidth / 1040);
+      stage.style.transform = 'scale(' + s + ')';
+      fig.style.height = Math.round(h * s) + 'px';
+    });
+  }
+  window.addEventListener('resize', fit);
+  window.addEventListener('load', fit);
+  fit();
+})();
+</script>
+</body>
+</html>
