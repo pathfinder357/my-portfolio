@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XP 보상 테이블 설계</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* 레이아웃: 포트폴리오 본문과 같은 한 줄 칼럼. 전체 관계도 → 판단 세 개(원장 · 지갑 · 랭킹 원천). 무채색 박스만 */
+:root {
+  --bg: #f5f6f7;
+  --paper: #ffffff;
+  --ink: #17191c;
+  --ink-2: #4d535a;
+  --muted: #858b92;
+  --line: #d8dce0;
+  --box: #f0f2f4;
+  --accent: #2f4a66;
+  --sans: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+    --line: #2d3237; --box: #20252a; --accent: #8fb0d1; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --paper: #181b1e; --ink: #e6e8ea; --ink-2: #aab0b6; --muted: #7d848b;
+  --line: #2d3237; --box: #20252a; --accent: #8fb0d1; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: var(--sans); font-size: 16px; line-height: 1.75;
+  -webkit-font-smoothing: antialiased; word-break: keep-all; overflow-wrap: break-word;
+}
+.wrap { max-width: 780px; margin: 0 auto; padding-inline: 20px; padding-block: 0 96px; }
+
+header.top { padding-block: 56px 36px; border-bottom: 1px solid var(--line); }
+.back { font-size: 13px; margin: 0 0 18px; }
+.kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+h1 { font-size: clamp(24px, 4.2vw, 32px); line-height: 1.3; font-weight: 600; margin: 0 0 18px; text-wrap: balance; letter-spacing: -.01em; }
+.lede p { margin: 0; color: var(--ink-2); max-width: 62ch; }
+.lede p + p { margin-top: 6px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 24px; margin-top: 22px; font-size: 13px; color: var(--muted); }
+.meta b { font-weight: 500; color: var(--ink-2); margin-right: 6px; }
+
+article.card { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; padding: 28px 28px 26px; margin-top: 28px; }
+.card-no { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+.card h2 { font-size: 20px; font-weight: 600; line-height: 1.4; margin: 0 0 18px; text-wrap: balance; }
+.sec { margin-top: 26px; }
+.sec:first-of-type { margin-top: 0; }
+.sec h3 { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: .04em; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+.sec p { margin: 0; max-width: 66ch; }
+.sec p + p { margin-top: 8px; }
+.sec ul { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--box); padding: 1px 5px; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 14px; font-size: 13.5px; }
+
+figure.fig { margin: 0 0 6px; border: 1px solid var(--line); border-radius: 4px; padding: 12px; background: var(--paper); overflow-x: auto; }
+figure.fig svg { display: block; width: 100%; min-width: 560px; height: auto; }
+svg .b { fill: var(--box); stroke: var(--line); stroke-width: 1; }
+svg .p { fill: var(--paper); stroke: var(--line); stroke-width: 1; }
+svg .g { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+svg .ar { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+svg .dl { fill: none; stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }
+svg .ah { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+svg .hr { stroke: var(--line); stroke-width: 1; }
+svg .t { fill: var(--ink); font-size: 14px; font-weight: 600; font-family: var(--sans); }
+svg .s { fill: var(--ink-2); font-size: 12px; font-family: var(--sans); }
+svg .m { fill: var(--ink); font-size: 11.5px; font-family: var(--mono); }
+svg .k { fill: var(--muted); font-size: 10.5px; font-family: var(--mono); font-weight: 500; }
+svg .n { fill: var(--muted); font-size: 11px; font-family: var(--sans); }
+
+.nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 18px 0 0; }
+.num { background: var(--box); border-radius: 4px; padding: 10px 12px; }
+.num .l { font-size: 12px; color: var(--muted); }
+.num .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .nums { grid-template-columns: 1fr; } }
+
+dl.cond { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 22px 0 0; padding: 12px 14px; background: var(--box); border-radius: 4px; font-size: 13.5px; }
+dl.cond dt { color: var(--muted); }
+dl.cond dd { margin: 0; color: var(--ink-2); }
+@media (max-width: 480px) { dl.cond { grid-template-columns: 1fr; } dl.cond dd { margin-bottom: 6px; } }
+
+footer.end { margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+footer.end p { margin: 0; }
+footer.end p + p { margin-top: 4px; }
+@media (max-width: 560px) { article.card { padding: 20px 16px; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="ah" d="M2 1L8 5L2 9"/></marker>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="back"><a href="../GameQuest.html#ch1">← 포트폴리오 1장 설계로</a></p>
+  <p class="kicker">RP Gym · Game Service · 테이블 설계</p>
+  <h1>XP 보상 테이블 설계: 원장, 지갑, 랭킹 원천</h1>
+  <div class="lede">
+    <p>1장에서 말한 설계 판단이 어떤 테이블과 제약에 들어 있는지 정리했습니다.</p>
+    <p>테이블과 제약은 Flyway 마이그레이션, 숫자는 실험 결과 파일 기준입니다.</p>
+  </div>
+  <div class="meta">
+    <span><b>스키마</b>game_service</span>
+    <span><b>DB</b>PostgreSQL</span>
+    <span><b>코드</b>개인 리팩토링 저장소 develop</span>
+    <span><b>실험 결과</b>game-experiments-2026-10 태그</span>
+  </div>
+</header>
+
+<!-- 0. 전체 관계도 -->
+<article class="card" id="erd">
+  <p class="card-no">00</p>
+  <h2>전체 관계도</h2>
+  <div class="sec">
+    <figure class="fig">
+      <svg viewBox="0 0 680 672" role="img" aria-label="Game Service 테이블 관계도. 퀘스트 제안이 퀘스트를 가리키고, 파티 퀘스트가 파티를, 파티 퀘스트 멤버가 파티 퀘스트를 외래 키로 가리킨다. XP 원장과 지갑, 캐릭터는 외래 키 없이 같은 user_id로 이어지고, 원장 합과 지갑, 파티 카운터와 멤버 기여 합은 10분마다 대조한다">
+        <!-- 범례 -->
+        <line class="ar" x1="20" y1="16" x2="56" y2="16" marker-end="url(#ah)"/><text class="n" x="64" y="20">외래 키</text>
+        <line class="dl" x1="130" y1="16" x2="166" y2="16"/><text class="n" x="174" y="20">FK 없이 같은 user_id로 이어짐</text>
+        <rect class="g" x="362" y="8" width="16" height="14" rx="3"/><text class="n" x="386" y="20">다른 팀원 담당 테이블</text>
+        <text class="n" x="510" y="20">＝ 10분마다 대조하는 등식</text>
+
+        <!-- 1행: 스냅샷 · 제안 · 개인 퀘스트 -->
+        <rect class="b" x="10" y="40" width="210" height="104" rx="6"/>
+        <text class="t" x="22" y="61">user_latest_snapshots</text>
+        <line class="hr" x1="10" y1="70" x2="220" y2="70"/>
+        <text class="k" x="22" y="88">PK</text><text class="m" x="44" y="88">user_id</text>
+        <text class="m" x="44" y="105">activity_date</text>
+        <text class="m" x="44" y="122">measured_at</text>
+        <text class="m" x="44" y="139">steps · minutes · kcal</text>
+
+        <rect class="b" x="235" y="40" width="210" height="104" rx="6"/>
+        <text class="t" x="247" y="61">quest_suggestions</text>
+        <line class="hr" x1="235" y1="70" x2="445" y2="70"/>
+        <text class="k" x="247" y="88">PK</text><text class="m" x="269" y="88">suggestion_id</text>
+        <text class="m" x="269" y="105">user_id</text>
+        <text class="m" x="269" y="122">status · expires_at</text>
+        <text class="k" x="247" y="139">FK</text><text class="m" x="269" y="139">quest_id</text>
+
+        <rect class="b" x="460" y="40" width="210" height="138" rx="6"/>
+        <text class="t" x="472" y="61">quests</text>
+        <line class="hr" x1="460" y1="70" x2="670" y2="70"/>
+        <text class="k" x="472" y="88">PK</text><text class="m" x="494" y="88">quest_id</text>
+        <text class="k" x="472" y="105">UK</text><text class="m" x="494" y="105">suggestion_id</text>
+        <text class="m" x="494" y="122">user_id · status</text>
+        <text class="m" x="494" y="139">baseline_val</text>
+        <text class="m" x="494" y="156">last_applied_measured_at</text>
+        <text class="m" x="494" y="173">reward_xp</text>
+
+        <line class="ar" x1="445" y1="135" x2="458" y2="135" marker-end="url(#ah)"/>
+
+        <!-- 2행: 파티 · 파티 퀘스트 · 멤버 -->
+        <rect class="g" x="10" y="214" width="210" height="70" rx="6"/>
+        <text class="t" x="22" y="235">parties</text>
+        <line class="hr" x1="10" y1="244" x2="220" y2="244"/>
+        <text class="k" x="22" y="262">PK</text><text class="m" x="44" y="262">id</text>
+        <text class="n" x="44" y="278">파티 담당 팀원 테이블</text>
+
+        <rect class="b" x="235" y="214" width="210" height="138" rx="6"/>
+        <text class="t" x="247" y="235">party_quests</text>
+        <line class="hr" x1="235" y1="244" x2="445" y2="244"/>
+        <text class="k" x="247" y="262">PK</text><text class="m" x="269" y="262">party_quest_id</text>
+        <text class="k" x="247" y="279">FK</text><text class="m" x="269" y="279">party_id</text>
+        <text class="m" x="269" y="296">current_val</text><text class="n" x="360" y="296">공유 카운터</text>
+        <text class="m" x="269" y="313">status</text><text class="n" x="320" y="313">완료 가드</text>
+        <text class="m" x="269" y="330">target_val · reward_xp</text>
+        <text class="m" x="269" y="347">expired_at</text>
+
+        <rect class="b" x="460" y="214" width="210" height="138" rx="6"/>
+        <text class="t" x="472" y="235">party_quest_members</text>
+        <line class="hr" x1="460" y1="244" x2="670" y2="244"/>
+        <text class="k" x="472" y="262">PK</text><text class="m" x="494" y="262">party_quest_member_id</text>
+        <text class="k" x="472" y="279">FK</text><text class="m" x="494" y="279">party_quest_id</text>
+        <text class="k" x="472" y="296">UK</text><text class="m" x="494" y="296">(party_quest_id, user_id)</text>
+        <text class="m" x="494" y="313">baseline_val</text><text class="n" x="590" y="313">NULL=미확정</text>
+        <text class="m" x="494" y="330">contributed_val</text>
+        <text class="m" x="494" y="347">last_applied_measured_at</text>
+
+        <line class="ar" x1="235" y1="279" x2="222" y2="279" marker-end="url(#ah)"/>
+        <line class="ar" x1="460" y1="279" x2="447" y2="279" marker-end="url(#ah)"/>
+
+        <!-- 등식: 카운터 = 기여 합 -->
+        <path class="ar" d="M340 352 V370 H565 V352"/>
+        <text class="s" x="452" y="387" text-anchor="middle">＝ current_val = SUM(contributed_val)</text>
+
+        <!-- 3행: 원장 · 지갑 · 캐릭터 -->
+        <rect class="b" x="10" y="414" width="210" height="138" rx="6"/>
+        <text class="t" x="22" y="435">xp_ledgers</text><text class="n" x="104" y="435">INSERT만</text>
+        <line class="hr" x1="10" y1="444" x2="220" y2="444"/>
+        <text class="k" x="22" y="462">PK</text><text class="m" x="44" y="462">ledger_id</text>
+        <text class="k" x="22" y="479">UK</text><text class="m" x="44" y="479">(user_id, source_type,</text>
+        <text class="m" x="44" y="496"> source_id)</text>
+        <text class="m" x="44" y="513">amount &gt; 0</text>
+        <text class="m" x="44" y="530">occurred_at</text>
+        <text class="n" x="44" y="546">source_id: 개인 · 파티 퀘스트</text>
+
+        <rect class="b" x="235" y="414" width="210" height="87" rx="6"/>
+        <text class="t" x="247" y="435">wallets</text><text class="n" x="305" y="435">사용자당 1행</text>
+        <line class="hr" x1="235" y1="444" x2="445" y2="444"/>
+        <text class="k" x="247" y="462">PK</text><text class="m" x="269" y="462">user_id</text>
+        <text class="m" x="269" y="479">xp ≥ 0</text>
+        <text class="m" x="269" y="496">updated_at</text>
+
+        <rect class="b" x="460" y="414" width="210" height="87" rx="6"/>
+        <text class="t" x="472" y="435">characters</text>
+        <line class="hr" x1="460" y1="444" x2="670" y2="444"/>
+        <text class="k" x="472" y="462">PK</text><text class="m" x="494" y="462">id</text>
+        <text class="k" x="472" y="479">UK</text><text class="m" x="494" y="479">user_id</text>
+        <text class="m" x="494" y="496">level</text>
+
+        <!-- 등식: 원장 합 = 지갑 (대조 대상) -->
+        <path class="ar" d="M115 552 V568 H300 V501"/>
+        <text class="s" x="207" y="586" text-anchor="middle">＝ SUM(xp_ledgers.amount) = wallets.xp</text>
+        <!-- 재구축 원천: 대조가 아니라 읽기 관계 -->
+        <path class="dl" d="M400 501 V520 H565 V501"/>
+        <text class="n" x="482" y="537" text-anchor="middle">랭킹 재구축이 user_id로 합쳐 읽음</text>
+
+        <!-- 4행: outbox -->
+        <rect class="b" x="10" y="604" width="660" height="56" rx="6"/>
+        <text class="t" x="22" y="625">outbox_events</text>
+        <text class="n" x="134" y="625">지급과 같은 트랜잭션에서 적재</text>
+        <text class="k" x="22" y="648">PK</text><text class="m" x="44" y="648">outbox_id</text>
+        <text class="k" x="130" y="648">UK</text><text class="m" x="152" y="648">event_id</text>
+        <text class="k" x="230" y="648">UK</text><text class="m" x="252" y="648">(aggregate_type, aggregate_id, event_type)</text>
+        <text class="m" x="560" y="648">status</text>
+      </svg>
+    </figure>
+    <ul>
+      <li>실선은 DB에 건 외래 키입니다. 원장 · 지갑 · 캐릭터는 외래 키 없이 같은 <code>user_id</code>로만 이어집니다.</li>
+      <li><code>xp_ledgers.source_id</code>는 <code>source_type</code>에 따라 개인 퀘스트나 파티 퀘스트를 가리킵니다. 가리키는 테이블이 하나가 아니라 외래 키를 걸 수 없어서, <code>(user_id, source_type, source_id)</code> 유니크 제약으로 같은 출처의 지급을 한 번으로 묶었습니다.</li>
+      <li>그림의 등식 두 개는 정합성 대조 작업이 10분마다 확인합니다. 어긋난 수가 0이 아니면 Slack으로 알립니다.</li>
+    </ul>
+    <p class="links">
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/resources/db/migration/V2__create_game_service_tables.sql">V2 마이그레이션</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/resources/db/migration/V7__add_quest_suggestions_and_party_quests.sql">V7 마이그레이션</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/java/com/workoutdone/rpgym/game/reconcile/application/ReconciliationChecks.java">대조 SQL</a>
+    </p>
+  </div>
+</article>
+
+<!-- 1. 원장 -->
+<article class="card" id="ledger">
+  <p class="card-no">01</p>
+  <h2>XP 원장: INSERT만 받고 유니크 제약으로 중복을 막음</h2>
+  <div class="sec">
+    <figure class="fig">
+      <svg viewBox="0 0 680 168" role="img" aria-label="같은 이벤트가 다시 와도 지급 이력을 먼저 조회해 건너뛰고, 조회와 INSERT 사이에 끼어든 중복은 유니크 제약이 롤백시킨다. 통과한 건만 지갑에 더한다">
+        <rect class="b" x="10" y="40" width="130" height="56" rx="6"/>
+        <text class="t" x="75" y="63" text-anchor="middle">완료 판정</text>
+        <text class="s" x="75" y="83" text-anchor="middle">같은 이벤트 재전달</text>
+        <line class="ar" x1="140" y1="68" x2="170" y2="68" marker-end="url(#ah)"/>
+
+        <rect class="b" x="174" y="40" width="150" height="56" rx="6"/>
+        <text class="t" x="249" y="63" text-anchor="middle">① 지급 이력 조회</text>
+        <text class="s" x="249" y="83" text-anchor="middle">있으면 조용히 건너뜀</text>
+        <line class="ar" x1="324" y1="68" x2="354" y2="68" marker-end="url(#ah)"/>
+
+        <rect class="b" x="358" y="40" width="150" height="56" rx="6"/>
+        <text class="t" x="433" y="63" text-anchor="middle">② 원장 INSERT</text>
+        <text class="s" x="433" y="83" text-anchor="middle">uk_xp_ledgers_source</text>
+        <line class="ar" x1="508" y1="68" x2="538" y2="68" marker-end="url(#ah)"/>
+
+        <rect class="b" x="542" y="40" width="128" height="56" rx="6"/>
+        <text class="t" x="606" y="63" text-anchor="middle">③ 지갑 갱신</text>
+        <text class="s" x="606" y="83" text-anchor="middle">xp = xp + :amount</text>
+
+        <line class="ar" x1="433" y1="96" x2="433" y2="122" marker-end="url(#ah)"/>
+        <text class="s" x="433" y="140" text-anchor="middle">①과 ② 사이에 끼어든 중복 → 유니크 위반 → 롤백</text>
+        <text class="n" x="340" y="22" text-anchor="middle">①②③이 한 트랜잭션</text>
+      </svg>
+    </figure>
+    <ul>
+      <li>XP 지급은 <code>xp_ledgers</code>에 행을 하나 추가하는 것으로만 남깁니다. 원장을 고치거나 지우는 쿼리는 없습니다.</li>
+      <li>지급 전에 같은 출처로 이미 지급했는지 먼저 조회합니다. 이 조회는 재전달된 이벤트를 예외 없이 건너뛰기 위한 것이고, 조회와 INSERT 사이에 끼어든 중복을 실제로 막는 것은 유니크 제약입니다.</li>
+      <li>원장은 바뀌지 않기 때문에, 지갑 값이 틀어져도 원장 합계와 비교하면 어느 사용자의 지갑이 틀렸는지 찾을 수 있습니다.</li>
+    </ul>
+    <p class="links">
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/java/com/workoutdone/rpgym/game/xp/application/XpGrantService.java">XpGrantService</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/DLT_재처리_20261011-210048.txt">DLT 재처리 결과</a>
+    </p>
+  </div>
+</article>
+
+<!-- 2. 지갑 -->
+<article class="card" id="wallet">
+  <p class="card-no">02</p>
+  <h2>지갑: 읽지 않고 UPDATE 한 문장으로 더함</h2>
+  <div class="sec">
+    <figure class="fig">
+      <svg viewBox="0 0 680 236" role="img" aria-label="고치기 전에는 개인 보상과 파티 보상 트랜잭션이 같은 옛 값 100을 읽고 각자 써서 30이 사라졌다. 지금은 UPDATE 한 문장이라 뒤 트랜잭션이 행 락을 기다렸다가 커밋된 값 위에 더해 140이 된다">
+        <text class="t" x="20" y="24">고치기 전: 읽고 → 더하고 → 쓰기</text>
+        <text class="t" x="360" y="24">지금: UPDATE 한 문장</text>
+        <line class="hr" x1="340" y1="12" x2="340" y2="226"/>
+
+        <text class="s" x="20" y="52">개인 보상 +10</text><text class="s" x="190" y="52">파티 보상 +30</text>
+        <rect class="b" x="20" y="62" width="140" height="30" rx="5"/><text class="m" x="90" y="81" text-anchor="middle">읽음 100</text>
+        <rect class="b" x="190" y="62" width="140" height="30" rx="5"/><text class="m" x="260" y="81" text-anchor="middle">읽음 100</text>
+        <rect class="b" x="190" y="102" width="140" height="30" rx="5"/><text class="m" x="260" y="121" text-anchor="middle">씀 130</text>
+        <rect class="b" x="20" y="142" width="140" height="30" rx="5"/><text class="m" x="90" y="161" text-anchor="middle">씀 110</text>
+        <text class="s" x="175" y="202" text-anchor="middle">결과 110 · 파티 보상 30이 사라짐</text>
+
+        <text class="s" x="360" y="52">개인 보상 +10</text><text class="s" x="530" y="52">파티 보상 +30</text>
+        <rect class="b" x="360" y="62" width="140" height="30" rx="5"/><text class="m" x="430" y="81" text-anchor="middle">xp = xp + 10</text>
+        <rect class="g" x="530" y="62" width="140" height="30" rx="5"/><text class="s" x="600" y="81" text-anchor="middle">행 락 대기</text>
+        <rect class="b" x="360" y="102" width="140" height="30" rx="5"/><text class="m" x="430" y="121" text-anchor="middle">커밋 110</text>
+        <line class="ar" x1="500" y1="117" x2="528" y2="149" marker-end="url(#ah)"/>
+        <rect class="b" x="530" y="142" width="140" height="30" rx="5"/><text class="m" x="600" y="161" text-anchor="middle">xp = xp + 30</text>
+        <text class="s" x="515" y="202" text-anchor="middle">결과 140 · 둘 다 반영</text>
+      </svg>
+    </figure>
+    <ul>
+      <li><code>wallets</code>는 사용자당 한 행이고 총 XP를 담습니다.</li>
+      <li>고치기 전에는 지갑을 읽고 자바에서 더한 뒤 변경 감지로 썼습니다. 파티 완료 보상은 마지막 기여자의 컨슈머 스레드가 멤버 전원의 지갑을 갱신하기 때문에, 같은 순간 그 멤버의 개인 보상이 겹치면 두 트랜잭션이 같은 옛 값을 읽었습니다.</li>
+      <li>지금은 <code>xp = xp + :amount</code> 한 문장으로 더합니다. 뒤 트랜잭션은 앞 트랜잭션의 행 락이 풀릴 때까지 기다렸다가 커밋된 값 위에 더합니다.</li>
+      <li>첫 지급은 지갑 행이 없어서 UPDATE가 0행을 돌려주고, 이때만 INSERT합니다. 첫 지급 두 건이 겹치면 PK 위반으로 한쪽이 롤백되고 컨슈머가 다시 처리합니다. 사용자당 한 번뿐인 경합이라 이 재시도는 받아들였습니다.</li>
+      <li>벌크 UPDATE는 JPA Auditing을 거치지 않아서 <code>updated_at</code>을 쿼리에서 직접 갱신합니다.</li>
+    </ul>
+    <div class="nums">
+      <div class="num"><div class="l">고치기 전 · XP를 잃은 사용자</div><div class="v">33명</div></div>
+      <div class="num"><div class="l">고치기 전 · 사라진 XP</div><div class="v">990</div></div>
+      <div class="num"><div class="l">지금 코드 · XP를 잃은 사용자</div><div class="v">0명</div></div>
+    </div>
+    <dl class="cond">
+      <dt>조건</dt><dd>400명에게 개인(+10) · 파티(+30) 보상 800건을 동시에 지급, 실험용 지연 200ms</dd>
+      <dt>판정</dt><dd>지갑과 원장 합계가 다른 사용자 수. 고치기 전에 사라진 990은 모두 파티 보상(30 × 33명)</dd>
+    </dl>
+    <p class="links">
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/java/com/workoutdone/rpgym/game/xp/adapter/out/persistence/WalletJpaRepository.java">WalletJpaRepository</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/지갑_lostupdate_고치기전_20261011-190827.txt">고치기 전 결과</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/지갑_lostupdate_지금코드_20261011-191258.txt">지금 코드 결과</a>
+    </p>
+  </div>
+</article>
+
+<!-- 3. 랭킹 원천 -->
+<article class="card" id="ranking-source">
+  <p class="card-no">03</p>
+  <h2>랭킹 원천: 두 테이블을 인덱스로 필요한 만큼만 읽음</h2>
+  <div class="sec">
+    <figure class="fig">
+      <svg viewBox="0 0 680 268" role="img" aria-label="예전 쿼리는 characters와 wallets 전체를 UNION으로 합치고 정렬한 뒤 다음 1000명을 골라 113밀리초가 걸렸다. 지금 쿼리는 테이블마다 user_id 인덱스로 다음 1000명만 읽고 합쳐 1.1밀리초가 걸린다">
+        <text class="t" x="20" y="24">예전: UNION 먼저</text>
+        <text class="t" x="360" y="24">지금: 테이블마다 먼저 자름</text>
+        <line class="hr" x1="340" y1="12" x2="340" y2="258"/>
+
+        <rect class="b" x="20" y="40" width="140" height="44" rx="5"/><text class="m" x="90" y="60" text-anchor="middle">characters</text><text class="s" x="90" y="76" text-anchor="middle">남은 행 전부</text>
+        <rect class="b" x="180" y="40" width="140" height="44" rx="5"/><text class="m" x="250" y="60" text-anchor="middle">wallets</text><text class="s" x="250" y="76" text-anchor="middle">남은 행 전부</text>
+        <line class="ar" x1="90" y1="84" x2="150" y2="110" marker-end="url(#ah)"/>
+        <line class="ar" x1="250" y1="84" x2="190" y2="110" marker-end="url(#ah)"/>
+        <rect class="b" x="60" y="114" width="220" height="44" rx="5"/><text class="m" x="170" y="134" text-anchor="middle">UNION</text><text class="s" x="170" y="150" text-anchor="middle">중복 제거하려고 합치고 정렬</text>
+        <line class="ar" x1="170" y1="158" x2="170" y2="178" marker-end="url(#ah)"/>
+        <rect class="b" x="60" y="182" width="220" height="30" rx="5"/><text class="m" x="170" y="201" text-anchor="middle">user_id &gt; :after LIMIT 1000</text>
+        <text class="s" x="170" y="240" text-anchor="middle">Seq Scan 2 · 113.3ms · 버퍼 2,716</text>
+
+        <rect class="b" x="360" y="40" width="140" height="44" rx="5"/><text class="m" x="430" y="60" text-anchor="middle">characters</text><text class="s" x="430" y="76" text-anchor="middle">uk_characters_user_id</text>
+        <rect class="b" x="520" y="40" width="140" height="44" rx="5"/><text class="m" x="590" y="60" text-anchor="middle">wallets</text><text class="s" x="590" y="76" text-anchor="middle">pk_wallets</text>
+        <text class="n" x="430" y="100" text-anchor="middle">:after 다음 1,000명</text>
+        <text class="n" x="590" y="100" text-anchor="middle">:after 다음 1,000명</text>
+        <line class="ar" x1="430" y1="106" x2="490" y2="128" marker-end="url(#ah)"/>
+        <line class="ar" x1="590" y1="106" x2="530" y2="128" marker-end="url(#ah)"/>
+        <rect class="b" x="400" y="132" width="220" height="44" rx="5"/><text class="m" x="510" y="152" text-anchor="middle">UNION ALL → GROUP BY</text><text class="s" x="510" y="168" text-anchor="middle">사용자별 MAX(xp)</text>
+        <line class="ar" x1="510" y1="176" x2="510" y2="190" marker-end="url(#ah)"/>
+        <rect class="b" x="400" y="194" width="220" height="24" rx="5"/><text class="m" x="510" y="210" text-anchor="middle">LIMIT 1000</text>
+        <text class="s" x="510" y="240" text-anchor="middle">Index Only Scan + Index Scan · 1.1ms · 버퍼 41</text>
+      </svg>
+    </figure>
+    <ul>
+      <li>랭킹 재구축은 <code>characters</code>와 <code>wallets</code>를 합쳐 사용자마다 총 XP를 구합니다. XP는 받았는데 레벨 반영이 실패한 사용자는 지갑에만 있어서, 한 테이블만 읽으면 빠집니다.</li>
+      <li>예전 쿼리는 두 테이블을 UNION으로 먼저 합친 뒤 <code>:after</code> 다음 1,000명을 골랐습니다. UNION은 중복을 지우려고 남은 행 전체를 합치고 정렬하므로, 키셋 페이지네이션인데도 페이지 비용이 남은 사용자 수에 비례했습니다.</li>
+      <li>지금은 테이블마다 <code>user_id</code> 인덱스로 <code>:after</code> 다음 1,000명만 읽고, UNION ALL로 합친 뒤 사용자별로 묶습니다.</li>
+      <li>먼저 잘라도 결과가 맞는 이유는, 전체 순서에서 앞 1,000명 안에 드는 사용자는 자기 테이블에서도 반드시 앞 1,000명 안에 들기 때문입니다. 그보다 앞선 사용자가 1,000명보다 적습니다.</li>
+    </ul>
+    <div class="nums">
+      <div class="num"><div class="l">페이지 1회</div><div class="v">113.3 → 1.1ms</div></div>
+      <div class="num"><div class="l">읽은 버퍼</div><div class="v">2,716 → 41</div></div>
+      <div class="num"><div class="l">재구축 10만 명</div><div class="v">7.8 → 1.7초</div></div>
+    </div>
+    <dl class="cond">
+      <dt>데이터</dt><dd>10만 525명, 배치 1,000</dd>
+      <dt>실행 계획</dt><dd>5만 번째 사용자 다음 1,000명을 같은 실행 안에서 예전 쿼리와 지금 쿼리로 비교</dd>
+      <dt>재구축 시간</dt><dd>UNION 쿼리 7.8초 → 지금 1.7초. 사용자마다 따로 조회하던 처음 방식(69.7초)과 비교하면 40배</dd>
+    </dl>
+    <p class="links">
+      <a href="https://github.com/pathfinder357/rp-gym/blob/develop/game-service/src/main/java/com/workoutdone/rpgym/game/character/adapter/out/persistence/CharacterRepository.java">CharacterRepository</a>
+      <a href="https://github.com/pathfinder357/rp-gym/blob/game-experiments-2026-10/experiments/results/랭킹_재구축_10만명_20261011-205010.txt">재구축 결과 · 실행 계획</a>
+    </p>
+  </div>
+</article>
+
+<footer class="end">
+  <p>테이블과 제약은 Flyway 마이그레이션 V2 · V7 · V9 · V11, 숫자는 experiments/results의 결과 파일에서 가져왔습니다.</p>
+  <p>그림의 컬럼은 설계 판단에 필요한 것만 골랐고, 생성 · 수정 시각 같은 공통 컬럼은 뺐습니다.</p>
+</footer>
+
+</div>
+</body>
+</html>
